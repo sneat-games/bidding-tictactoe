@@ -110,7 +110,7 @@ func (b Board) Outcome() Outcome {
 				hasO = true
 			}
 		}
-		if !(hasX && hasO) {
+		if !hasX || !hasO {
 			winnable = true
 		}
 	}
