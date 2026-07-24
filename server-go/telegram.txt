@@ -1,8 +1,0 @@
-Description
-===========
-🎲 An old Tic-Tac-Toe game with a Poker twist.
-Rules: https://biddingtictactoe.com/
-
-📖 This game is open source at https://github.com/prizarena/bidding-tictactoe/server-go
-
-🤖 Developed in Go language using https://github.com/strongo/bots-framework

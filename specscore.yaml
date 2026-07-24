@@ -1,0 +1,7 @@
+# SpecScore Repo Config Schema: https://specscore.md/repo-config
+
+project:
+    title: Bidding Tic-Tac-Toe
+    host: github.com
+    org: sneat-games
+    repo: bidding-tictactoe
