@@ -18,7 +18,11 @@ func forceSaveMatch(t *testing.T, ctx context.Context, db dal.DB, matchID string
 	t.Helper()
 	err := db.RunReadwriteTransaction(ctx, func(ctx context.Context, tx dal.ReadwriteTransaction) error {
 		rec := record.NewRecordWithData(NewMatchKey(matchID), match)
-		return tx.Set(ctx, rec)
+		// forceSaveMatch exists to plant deliberately-invalid matches for the
+		// error-path tests. dalgo v0.64 validates on the framework write path,
+		// so the opt-out has to be explicit — that is what this helper means
+		// by "force".
+		return dal.WithoutValidation(tx).Set(ctx, rec)
 	})
 	if err != nil {
 		t.Fatal(err)
