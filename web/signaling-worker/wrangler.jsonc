@@ -4,18 +4,17 @@
   "main": "index.ts",
   "compatibility_date": "2025-08-11",
   "compatibility_flags": ["nodejs_compat"],
-  "ai_bindings": { "use": [] },
   "kv_namespaces": [
     {
       "binding": "SIGNAL",
-      "id": "REPLACE_WITH_SIGNAL_KV_ID",
-      "preview_id": "REPLACE_WITH_SIGNAL_PREVIEW_KV_ID"
+      "id": "f42b3d93bcb143ff8aaa3d8d2db62096",
+      "preview_id": "1644960cca11414d8ef3c60e50374ed8"
     }
   ],
   "routes": [
     {
-      "pattern": "signal.bidding-tictactoe.sneat.games/*",
-      "custom_domain": false
+      "pattern": "signal.bidding-tictactoe.sneat.games",
+      "custom_domain": true
     }
   ],
   "vars": {

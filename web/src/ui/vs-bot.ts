@@ -1,25 +1,49 @@
 // vs-bot screen. Renders the board, the bid input (linked slider + number),
-// and the turn result. A rematch restarts in the same tab.
+// the turn result, and a right-side game log with bid-size progress bars.
+// A rematch restarts in the same tab (and clears the log).
 
-import { Mark, Outcome, boardString, boardOutcome, newGame, resolveTurn, markString, outcomeString } from "../engine/btttplay";
+import { Mark, Outcome, boardOutcome, newGame, resolveTurn, markString, outcomeString, Move } from "../engine/btttplay";
 import { botMove } from "../bot/bot";
 import { createBidInput } from "./bid-input";
+import { createGameLog } from "./game-log";
 
 const BUDGET = 100;
 
 export async function runVsBot(root: HTMLElement): Promise<void> {
   let game = newGame(BUDGET);
   let human: Mark = Mark.X;
-  let bot: Mark = Mark.O;
+  let botMark: Mark = Mark.O;
+  let turn = 0;
+
+  // Two-column layout: board area (left) + game log (right).
+  root.innerHTML = "";
+  const screen = document.createElement("div");
+  screen.className = "game-screen";
+  const boardArea = document.createElement("div");
+  boardArea.className = "game-screen__board";
+  const logArea = document.createElement("div");
+  logArea.className = "game-screen__log";
+  const log = createGameLog({
+    initialBudget: BUDGET,
+    xLabel: "You",
+    oLabel: "Bot",
+  });
+  logArea.append(log.el);
+  screen.append(boardArea, logArea);
+  root.append(screen);
 
   while (true) {
-    const outcome = await playOneTurn(root, game, human, bot);
+    const outcome = await playOneTurn(boardArea, game, human, botMark, log, turn);
     if (outcome !== Outcome.Ongoing) {
-      const again = await renderResult(root, outcome, game);
+      const again = await renderResult(boardArea, outcome, game);
       if (!again) return;
       game = newGame(BUDGET);
       human = Mark.X;
-      bot = Mark.O;
+      botMark = Mark.O;
+      turn = 0;
+      log.clear();
+    } else {
+      turn++;
     }
   }
 }
@@ -29,6 +53,8 @@ async function playOneTurn(
   game: ReturnType<typeof newGame>,
   human: Mark,
   botMark: Mark,
+  log: ReturnType<typeof createGameLog>,
+  turn: number,
 ): Promise<Outcome> {
   renderBoard(root, game, human, botMark);
   // Wait for human's move.
@@ -39,12 +65,24 @@ async function playOneTurn(
     budgetRemaining: game.budget[botMark === Mark.X ? 0 : 1],
     me: botMark,
   });
-  const xMove = human === Mark.X ? humanMove : botMoveData;
-  const oMove = human === Mark.X ? botMoveData : humanMove;
+  const xMove: Move = human === Mark.X ? humanMove : botMoveData;
+  const oMove: Move = human === Mark.X ? botMoveData : humanMove;
+  const budgetsBefore: [number, number] = [game.budget[0], game.budget[1]];
   try {
     const { game: next, result } = resolveTurn(game, xMove, oMove);
-    renderTurnResult(root, result, next, human);
     Object.assign(game, next);
+    // Re-render the board with the post-move state so the winning mark
+    // is visible (and the prompt/submit UI is cleared).
+    renderBoard(root, game, human, botMark);
+    renderTurnResult(root, result, game, human);
+    log.append({
+      turn,
+      result,
+      xMove,
+      oMove,
+      budgetsBefore,
+      budgetsAfter: [game.budget[0], game.budget[1]],
+    });
     return boardOutcome(game.board);
   } catch (e) {
     renderError(root, e instanceof Error ? e.message : String(e));
@@ -82,31 +120,20 @@ async function askHuman(
 
   const prompt = document.createElement("div");
   prompt.className = "prompt";
-  prompt.append("Click a cell, then ", bid.el);
-
-  const submit = document.createElement("button");
-  submit.type = "button";
-  submit.textContent = "Submit hidden bid";
-  submit.disabled = true;
-
-  root.append(prompt, submit);
+  prompt.append("Pick your bid, then click a cell to commit:", bid.el);
+  root.append(prompt);
 
   let chosenCell: number | null = null;
   const cells = root.querySelectorAll<HTMLButtonElement>(".board__cell");
-  cells.forEach((c) => {
-    if (c.disabled) return;
-    c.addEventListener("click", () => {
-      cells.forEach((x) => x.classList.remove("selected"));
-      c.classList.add("selected");
-      chosenCell = parseInt(c.dataset.cell ?? "", 10);
-      submit.disabled = false;
-    });
-  });
-
   return new Promise((resolve) => {
-    submit.addEventListener("click", () => {
-      if (chosenCell === null) return;
-      resolve({ bid: bid.value(), cell: chosenCell });
+    cells.forEach((c) => {
+      if (c.disabled) return;
+      c.addEventListener("click", () => {
+        chosenCell = parseInt(c.dataset.cell ?? "", 10);
+        if (chosenCell !== null) {
+          resolve({ bid: bid.value(), cell: chosenCell });
+        }
+      });
     });
   });
 }
@@ -133,7 +160,7 @@ function renderResult(
 ): Promise<boolean> {
   const banner = document.createElement("p");
   banner.className = "result-banner";
-  banner.textContent = `Game over: ${outcomeString(outcome)}. Board: ${boardString(game.board)}`;
+  banner.textContent = `Game over: ${outcomeString(outcome)}. Budgets — You: ${game.budget[0]}, Bot: ${game.budget[1]}.`;
   const again = document.createElement("button");
   again.type = "button";
   again.textContent = "Rematch";

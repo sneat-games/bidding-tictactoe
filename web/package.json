@@ -12,10 +12,10 @@
     "lint": "eslint . --ext .ts,.astro",
     "test": "vitest run",
     "test:watch": "vitest",
-    "worker:dev": "wrangler dev --config web/signaling-worker/wrangler.jsonc",
-    "worker:deploy": "wrangler deploy --config web/signaling-worker/wrangler.jsonc",
-    "host:dev": "wrangler dev --config web/host-worker/wrangler.jsonc",
-    "host:deploy": "wrangler deploy --config web/host-worker/wrangler.jsonc"
+    "worker:dev": "wrangler dev --config signaling-worker/wrangler.jsonc",
+    "worker:deploy": "wrangler deploy --config signaling-worker/wrangler.jsonc",
+    "host:dev": "wrangler dev --config host-worker/wrangler.jsonc",
+    "host:deploy": "wrangler deploy --config host-worker/wrangler.jsonc"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.4",
@@ -31,7 +31,7 @@
     "jsdom": "^30.0.1",
     "typescript": "^5.7.0",
     "vitest": "^2.1.0",
-    "wrangler": "^3.80.0"
+    "wrangler": "^4.120.1"
   },
   "engines": {
     "node": ">=22"

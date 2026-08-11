@@ -72,7 +72,7 @@ func TestBoard_EmptyCells(t *testing.T) {
 
 // --- ResolveTurn ------------------------------------------------------------
 
-func TestResolveTurn_HigherBidWins_PlacesAndSpends(t *testing.T) {
+func TestResolveTurn_HigherBidWins_PlacesAndTransfers(t *testing.T) {
 	g := NewGame(10)
 	next, res, err := ResolveTurn(g, Move{Bid: 5, Cell: 0}, Move{Bid: 3, Cell: 4})
 	if err != nil {
@@ -85,10 +85,13 @@ func TestResolveTurn_HigherBidWins_PlacesAndSpends(t *testing.T) {
 		t.Error("winner's mark not placed")
 	}
 	if next.Budget[0] != 5 {
-		t.Errorf("winner budget = %d, want 5 (spent the bid)", next.Budget[0])
+		t.Errorf("winner budget = %d, want 5 (paid the bid)", next.Budget[0])
 	}
-	if next.Budget[1] != 10 {
-		t.Errorf("loser budget = %d, want 10 (first-price: loser keeps budget)", next.Budget[1])
+	if next.Budget[1] != 15 {
+		t.Errorf("loser budget = %d, want 15 (received winner's bid: 10 + 5)", next.Budget[1])
+	}
+	if next.Budget[0]+next.Budget[1] != 20 {
+		t.Errorf("total budget not conserved: %d + %d = %d, want 20", next.Budget[0], next.Budget[1], next.Budget[0]+next.Budget[1])
 	}
 	if res.Outcome != Ongoing {
 		t.Errorf("outcome = %v, want Ongoing", res.Outcome)
@@ -97,7 +100,7 @@ func TestResolveTurn_HigherBidWins_PlacesAndSpends(t *testing.T) {
 
 func TestResolveTurn_TieBreakAlternates(t *testing.T) {
 	g := NewGame(10) // TieToX = true
-	// First tie -> X.
+	// First tie -> X (X transfers 5 to O).
 	g, res, err := ResolveTurn(g, Move{Bid: 5, Cell: 0}, Move{Bid: 5, Cell: 1})
 	if err != nil {
 		t.Fatal(err)
@@ -108,7 +111,10 @@ func TestResolveTurn_TieBreakAlternates(t *testing.T) {
 	if g.TieToX {
 		t.Error("TieToX should flip to false after a tie")
 	}
-	// Second tie -> O.
+	if g.Budget[0] != 5 || g.Budget[1] != 15 {
+		t.Errorf("after first tie: budget = %v, want [5 15] (X transfers 5 to O)", g.Budget)
+	}
+	// Second tie -> O (O transfers 4 to X).
 	g, res, err = ResolveTurn(g, Move{Bid: 4, Cell: 2}, Move{Bid: 4, Cell: 3})
 	if err != nil {
 		t.Fatal(err)
@@ -116,11 +122,17 @@ func TestResolveTurn_TieBreakAlternates(t *testing.T) {
 	if !res.TieBreak || res.Winner != O {
 		t.Fatalf("second tie: %+v, want tie-break to O", res)
 	}
-	if g.Board[3] != O || g.Budget[1] != 6 {
-		t.Errorf("O should have taken cell 3 for 4: board=%q budgetO=%d", g.Board.String(), g.Budget[1])
+	if g.Board[3] != O || g.Budget[1] != 11 {
+		t.Errorf("O should have taken cell 3 for 4 (transferring it to X): board=%q budgetO=%d", g.Board.String(), g.Budget[1])
+	}
+	if g.Budget[0] != 9 {
+		t.Errorf("X should have received O's 4 bid: budgetX = %d, want 9", g.Budget[0])
 	}
 	if !g.TieToX {
 		t.Error("TieToX should flip back to true")
+	}
+	if g.Budget[0]+g.Budget[1] != 20 {
+		t.Errorf("total budget not conserved after tie: %d + %d = %d", g.Budget[0], g.Budget[1], g.Budget[0]+g.Budget[1])
 	}
 }
 
@@ -178,16 +190,22 @@ func TestResolveTurn_GameOver(t *testing.T) {
 }
 
 func TestResolveTurn_BudgetRunsOut(t *testing.T) {
-	// A player who spends everything can still bid 0 (and only win via tie-break).
+	// A player who transfers away everything can still bid 0 (and only win
+	// via tie-break). The loser receiving transfers can grow above the
+	// initial budget.
 	g := NewGame(5)
+	// X bids 5 (all of it) vs O's 0. X wins and transfers 5 to O.
 	g, _, err := ResolveTurn(g, Move{Bid: 5, Cell: 0}, Move{Bid: 0, Cell: 4})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if g.Budget[0] != 0 {
-		t.Fatalf("X budget = %d, want 0", g.Budget[0])
+		t.Fatalf("X budget = %d, want 0 (paid the bid as transfer to O)", g.Budget[0])
 	}
-	// X now can only bid 0; O outbids with 1 and takes a cell.
+	if g.Budget[1] != 10 {
+		t.Fatalf("O budget = %d, want 10 (received 5 from X: 5 + 5)", g.Budget[1])
+	}
+	// X now can only bid 0; O outbids with 1 and takes a cell, paying X 1.
 	g, res, err := ResolveTurn(g, Move{Bid: 0, Cell: 1}, Move{Bid: 1, Cell: 4})
 	if err != nil {
 		t.Fatal(err)
@@ -195,8 +213,11 @@ func TestResolveTurn_BudgetRunsOut(t *testing.T) {
 	if res.Winner != O || g.Board[4] != O {
 		t.Fatalf("O should win when X is out of budget: %+v", res)
 	}
-	// Bidding more than the (now zero) budget must error.
-	if _, _, err := ResolveTurn(g, Move{Bid: 1, Cell: 1}, Move{Bid: 0, Cell: 2}); !errors.Is(err, ErrBidExceedsBudget) {
+	if g.Budget[0] != 1 || g.Budget[1] != 9 {
+		t.Errorf("after O wins a 1-bid turn: budget = %v, want [1 9] (O transferred 1 to X)", g.Budget)
+	}
+	// Bidding more than the (now 1) budget must error.
+	if _, _, err := ResolveTurn(g, Move{Bid: 2, Cell: 1}, Move{Bid: 0, Cell: 2}); !errors.Is(err, ErrBidExceedsBudget) {
 		t.Errorf("over-budget after spend: err = %v, want ErrBidExceedsBudget", err)
 	}
 }

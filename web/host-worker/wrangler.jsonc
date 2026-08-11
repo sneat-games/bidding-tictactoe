@@ -3,14 +3,15 @@
   "name": "bidding-tictactoe-sneat-games",
   "main": "index.ts",
   "compatibility_date": "2025-08-11",
-  "compatibility_flags": ["nodejs_compat", "assets"],
+  "compatibility_flags": ["nodejs_compat"],
   "assets": {
     "directory": "../dist",
-    "binding": "ASSETS"
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
   },
   "routes": [
     {
-      "pattern": "bidding-tictactoe.sneat.games/*",
+      "pattern": "bidding-tictactoe.sneat.games",
       "custom_domain": true
     }
   ],

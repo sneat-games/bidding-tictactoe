@@ -3,13 +3,16 @@
 // WebRTC dance through the CF Worker signaling relay).
 //
 // Once the DataChannel is open, both peers exchange hidden-bid moves using
-// the commit-reveal protocol in palindrome.ts. After a win/draw the peers
-// can rematch in the same room without navigating back through the menu.
+// the commit-reveal protocol in peer.ts. After a win/draw the peers can
+// rematch in the same room without navigating back through the menu.
+// A right-side game log shows each turn's winning (green) and losing (red)
+// bids plus running budget bars.
 
-import { Mark, Outcome, newGame, resolveTurn, boardOutcome, boardString, markString, outcomeString, Game } from "../engine/btttplay";
+import { Mark, Outcome, newGame, resolveTurn, boardOutcome, markString, outcomeString, Game, Move } from "../engine/btttplay";
 import { createBidInput } from "./bid-input";
 import { reserveRoomId } from "../pvp/room";
 import { hostPeer, guestPeer, WireMessage, PeerHandle, commitFor, verifyReveal, newSalt } from "../pvp/peer";
+import { createGameLog } from "./game-log";
 import * as cg from "../crazygames/sdk";
 
 const BUDGET = 100;
@@ -89,8 +92,26 @@ async function playMatchLoop(root: HTMLElement, peer: PeerHandle): Promise<void>
   while (true) {
     let game = newGame(BUDGET);
     const human = peer.youAre;
-    const outcome = await playTurns(root, peer, game, human);
-    const again = await renderFinal(root, outcome, game);
+
+    // Two-column layout: board area (left) + game log (right).
+    root.innerHTML = "";
+    const screen = document.createElement("div");
+    screen.className = "game-screen";
+    const boardArea = document.createElement("div");
+    boardArea.className = "game-screen__board";
+    const logArea = document.createElement("div");
+    logArea.className = "game-screen__log";
+    const log = createGameLog({
+      initialBudget: BUDGET,
+      xLabel: peer.youAre === Mark.X ? "You (X)" : "Friend (X)",
+      oLabel: peer.youAre === Mark.O ? "You (O)" : "Friend (O)",
+    });
+    logArea.append(log.el);
+    screen.append(boardArea, logArea);
+    root.append(screen);
+
+    const outcome = await playTurns(boardArea, peer, game, human, log);
+    const again = await renderFinal(boardArea, outcome, game);
     // Coordinate rematch with the other peer.
     let otherWantsRematch = false;
     const rematchPromise = new Promise<boolean>((resolve) => {
@@ -121,10 +142,11 @@ async function playTurns(
   peer: PeerHandle,
   game: Game,
   human: Mark,
+  log: ReturnType<typeof createGameLog>,
 ): Promise<Outcome> {
   let turn = 0;
   while (boardOutcome(game.board) === Outcome.Ongoing) {
-    await playOnePvpTurn(root, peer, game, turn, human);
+    await playOnePvpTurn(root, peer, game, turn, human, log);
     turn++;
   }
   return boardOutcome(game.board);
@@ -136,6 +158,7 @@ async function playOnePvpTurn(
   game: Game,
   turn: number,
   human: Mark,
+  log: ReturnType<typeof createGameLog>,
 ): Promise<void> {
   renderBoard(root, game, human);
   const humanMove = await askHuman(root, game, human);
@@ -151,11 +174,23 @@ async function playOnePvpTurn(
   const verified = await verifyReveal(pending.commit, { bid: oppReveal.bid, cell: pending.cell }, oppReveal.salt);
   if (!verified) throw new Error("opponent reveal failed verification");
 
-  const xMove = human === Mark.X ? humanMove : { bid: oppReveal.bid, cell: pending.cell };
-  const oMove = human === Mark.X ? { bid: oppReveal.bid, cell: pending.cell } : humanMove;
+  const xMove: Move = human === Mark.X ? humanMove : { bid: oppReveal.bid, cell: pending.cell };
+  const oMove: Move = human === Mark.X ? { bid: oppReveal.bid, cell: pending.cell } : humanMove;
+  const budgetsBefore: [number, number] = [game.budget[0], game.budget[1]];
   const { game: next, result } = resolveTurn(game, xMove, oMove);
   Object.assign(game, next);
+  // Re-render the board with the post-move state so the winning mark
+  // is visible (and the prompt/submit UI is cleared).
+  renderBoard(root, game, human);
   renderTurnResult(root, result, game, human);
+  log.append({
+    turn,
+    result,
+    xMove,
+    oMove,
+    budgetsBefore,
+    budgetsAfter: [game.budget[0], game.budget[1]],
+  });
 }
 
 function renderBoard(root: HTMLElement, game: Game, human: Mark) {
@@ -182,27 +217,16 @@ async function askHuman(root: HTMLElement, game: Game, human: Mark): Promise<{ b
   const bid = createBidInput({ max: remaining, initial: Math.floor(remaining / 2) });
   const prompt = document.createElement("div");
   prompt.className = "prompt";
-  prompt.append("Pick a cell and submit your hidden bid:", bid.el);
-  const submit = document.createElement("button");
-  submit.type = "button";
-  submit.textContent = "Commit bid";
-  submit.disabled = true;
-  root.append(prompt, submit);
-  let chosenCell: number | null = null;
+  prompt.append("Pick your bid, then click a cell to commit:", bid.el);
+  root.append(prompt);
   const cells = root.querySelectorAll<HTMLButtonElement>(".board__cell");
-  cells.forEach((c) => {
-    if (c.disabled) return;
-    c.addEventListener("click", () => {
-      cells.forEach((x) => x.classList.remove("selected"));
-      c.classList.add("selected");
-      chosenCell = parseInt(c.dataset.cell ?? "", 10);
-      submit.disabled = false;
-    });
-  });
   return new Promise((resolve) => {
-    submit.addEventListener("click", () => {
-      if (chosenCell === null) return;
-      resolve({ bid: bid.value(), cell: chosenCell });
+    cells.forEach((c) => {
+      if (c.disabled) return;
+      c.addEventListener("click", () => {
+        const cell = parseInt(c.dataset.cell ?? "", 10);
+        resolve({ bid: bid.value(), cell });
+      });
     });
   });
 }
@@ -251,7 +275,7 @@ function renderFinal(
 ): Promise<boolean> {
   const banner = document.createElement("p");
   banner.className = "result-banner";
-  banner.textContent = `Game over: ${outcomeString(outcome)}. Board: ${boardString(game.board)}`;
+  banner.textContent = `Game over: ${outcomeString(outcome)}. Budgets — You: ${game.budget[0]}, Friend: ${game.budget[1]}.`;
   const again = document.createElement("button");
   again.type = "button";
   again.textContent = "Rematch (same friend)";

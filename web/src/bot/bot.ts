@@ -1,10 +1,12 @@
 // Bot strategy for Bidding Tic-Tac-Toe vs-bot mode.
 //
-// Baseline heuristic, intentionally simple:
-//   - Bid: try to win a line if bot can complete one this turn (bid scales
-//     with how close the line is); otherwise bid a small fraction of the
-//     remaining budget to save it for later. If the budget is zero, bid 0
-//     and rely on the tie-break.
+// Baseline heuristic, intentionally simple. Under the first-price-TRANSFER
+// rule (winner pays their bid to the loser; total budget is conserved),
+// bidding the whole budget to win a single cell would gift that budget to
+// the opponent — so the bid sizing is deliberately restrained:
+//   - Bid: ~1/3 of remaining budget when bot has a winning cell, ~1/4 when
+//     blocking the opponent's win, and a small jittered slice otherwise.
+//     Zero budget -> bid 0 (rely on tie-break).
 //   - Cell: if there is a winning cell for the bot, take it. Else if there
 //     is a winning cell for the opponent, block it. Else take the centre,
 //     then a corner, then any open cell.
@@ -48,19 +50,22 @@ function pickBid(budgetRemaining: number, board: Board, me: Mark): number {
   const opponent: Mark = me === Mark.X ? Mark.O : Mark.X;
   const myWin = findWinningCell(board, me);
   const oppWin = findWinningCell(board, opponent);
+
+  // Under the first-price-TRANSFER rule, the winning bid is paid to the
+  // loser. Bidding the whole budget to win a single cell gifts it to the
+  // opponent — a losing strategy. So we bid enough to be likely to win the
+  // auction without vaporising our bankroll:
+  //   - Winning move available: bid ~1/3 of remaining (we want this cell).
+  //   - Block opponent's win: bid ~1/4 of remaining (important but not
+  //     as decisive as our own win).
+  //   - Mid/early game: bid a small slice with jitter to keep play alive.
   if (myWin !== undefined) {
-    // Win this turn: bid the whole budget if opponent blocks, otherwise
-    // bid just enough that a reasonable opponent can't easily outbid. For the
-    // baseline bot, bid the full remaining budget when a win is available.
-    return budgetRemaining;
+    return Math.max(1, Math.floor(budgetRemaining / 3));
   }
   if (oppWin !== undefined) {
-    // Must block — bid aggressively but leave 1 for future if possible.
-    return Math.max(1, budgetRemaining - 1);
+    return Math.max(1, Math.floor(budgetRemaining / 4));
   }
-  // Early/mid game: bid roughly half of remaining, with a little randomness
-  // so play feels alive.
-  const base = Math.floor(budgetRemaining / 2);
+  const base = Math.max(1, Math.floor(budgetRemaining / 6));
   const jitter = Math.floor(Math.random() * 3) - 1; // -1..+1
   return Math.max(0, Math.min(budgetRemaining, base + jitter));
 }

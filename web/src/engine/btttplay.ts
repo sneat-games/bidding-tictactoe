@@ -10,13 +10,14 @@
 //
 // Each turn both players secretly submit a Move: a Bid (staked from their
 // per-match budget) and a target Cell. The HIGHER bid wins the turn — that
-// player places their mark at their target cell and spends their bid from
-// their budget. It is a first-price auction: the loser keeps their whole
-// budget and their mark is not placed. Equal bids are decided by an
-// ALTERNATING tie-break (the first tie goes to X, the next to O, and so on)
-// so neither side keeps a permanent tie advantage. Three in a row wins; a
-// board on which no line can still be completed (in particular a full
-// board) is a draw.
+// player places their mark at their target cell. The winner PAYS their bid
+// to the LOSER (the loser's budget grows by the winning bid); the loser
+// keeps their own bid and their mark is not placed. The total budget across
+// both players is therefore conserved across the whole match. Equal bids
+// are decided by an ALTERNATING tie-break (the first tie goes to X, the
+// next to O, and so on) so neither side keeps a permanent tie advantage.
+// Three in a row wins; a board on which no line can still be completed
+// (in particular a full board) is a draw.
 //
 // The engine is coin-agnostic: "budget" is a plain integer. Mapping coins
 // onto a match (buy-in, pot, payout) is the session layer's job, exactly as
@@ -228,8 +229,10 @@ export interface TurnResult {
 // resolveTurn resolves one turn from both players' hidden moves. It compares
 // the bids (higher wins; equal bids use the alternating tie-break),
 // validates the WINNER's move only (the loser's move is discarded — their
-// mark is not placed and their budget is untouched), places the winning
-// mark, spends the winner's bid, and reports the resulting board outcome.
+// mark is not placed and their own bid is returned to them), places the
+// winning mark, TRANSFERS the winner's bid to the loser (so total budget
+// is conserved across the match), and reports the resulting board
+// outcome.
 //
 // Both bids must be non-negative and within the respective player's budget —
 // a bid is a real commitment, so you cannot bid what you cannot afford. On
@@ -267,7 +270,12 @@ export function resolveTurn(
   const board = g.board.slice();
   board[win.cell] = winner;
   const budget: [number, number] = [g.budget[0], g.budget[1]];
+  // First-price-transfer: the winner pays their bid, and that bid is added
+  // to the loser's budget. Total budget across both players is conserved
+  // across the match.
+  const li = wi === 0 ? 1 : 0;
   budget[wi] -= win.bid;
+  budget[li] += win.bid;
   const tieToX = tieBreak ? !g.tieToX : g.tieToX;
   const next: Game = { board, budget, tieToX };
   const result: TurnResult = {

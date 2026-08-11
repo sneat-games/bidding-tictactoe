@@ -47,17 +47,18 @@ describe("botMove produces legal moves", () => {
     expect([0, 1, 2, 3, 4, 5, 6, 7, 8]).toContain(move.cell);
     expect(board[move.cell]).toBe(Mark.Empty);
   });
-  it("bids the whole budget to win when a winning cell is available", () => {
+  it("bids about a third of remaining budget to win when a winning cell is available (first-price-transfer)", () => {
     const board = parseBoard("XX_______");
-    const move = botMove({ board, budgetRemaining: 5, me: Mark.X });
+    const move = botMove({ board, budgetRemaining: 9, me: Mark.X });
     expect(move.cell).toBe(2);
-    expect(move.bid).toBe(5);
+    // 9 / 3 = 3 — bidding all-in would gift the budget to O.
+    expect(move.bid).toBe(3);
   });
-  it("bids at least 1 when blocking an opponent's win", () => {
+  it("bids about a quarter of remaining budget when blocking an opponent's win", () => {
     const board = parseBoard("OO_______");
-    const move = botMove({ board, budgetRemaining: 4, me: Mark.X });
+    const move = botMove({ board, budgetRemaining: 8, me: Mark.X });
     expect(move.cell).toBe(2);
-    expect(move.bid).toBeGreaterThanOrEqual(1);
+    expect(move.bid).toBe(2); // 8 / 4 = 2
   });
   it("bids 0 when budget has run out", () => {
     const board = parseBoard("_________");

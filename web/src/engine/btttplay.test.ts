@@ -64,8 +64,8 @@ describe("Board.emptyCells", () => {
   });
 });
 
-describe("resolveTurn higher-bid wins, places and spends", () => {
-  it("X wins the turn and pays the bid", () => {
+describe("resolveTurn higher-bid wins, places and transfers", () => {
+  it("X wins the turn, pays the bid to O", () => {
     const g = newGame(10);
     const { game: next, result } = resolveTurn(g, { bid: 5, cell: 0 }, { bid: 3, cell: 4 });
     expect(result.winner).toBe(Mark.X);
@@ -73,27 +73,30 @@ describe("resolveTurn higher-bid wins, places and spends", () => {
     expect(result.bid).toBe(5);
     expect(result.tieBreak).toBe(false);
     expect(next.board[0]).toBe(Mark.X);
-    expect(next.budget[0]).toBe(5); // spent the bid
-    expect(next.budget[1]).toBe(10); // first-price: loser keeps budget
+    expect(next.budget[0]).toBe(5); // paid the bid
+    expect(next.budget[1]).toBe(15); // received 5 from X: 10 + 5
+    expect(next.budget[0] + next.budget[1]).toBe(20); // total conserved
     expect(result.outcome).toBe(Outcome.Ongoing);
   });
 });
 
 describe("resolveTurn tie-break alternates", () => {
-  it("first tie -> X, second tie -> O, parity flips each time", () => {
+  it("first tie -> X (X transfers 5 to O), second tie -> O (O transfers 4 to X)", () => {
     let g = newGame(10); // tieToX = true
     let res;
     ({ game: g, result: res } = resolveTurn(g, { bid: 5, cell: 0 }, { bid: 5, cell: 1 }));
     expect(res.tieBreak).toBe(true);
     expect(res.winner).toBe(Mark.X);
     expect(g.tieToX).toBe(false);
+    expect(g.budget).toEqual([5, 15]); // X transferred 5 to O
 
     ({ game: g, result: res } = resolveTurn(g, { bid: 4, cell: 2 }, { bid: 4, cell: 3 }));
     expect(res.tieBreak).toBe(true);
     expect(res.winner).toBe(Mark.O);
     expect(g.board[3]).toBe(Mark.O);
-    expect(g.budget[1]).toBe(6);
+    expect(g.budget).toEqual([9, 11]); // O transferred 4 to X
     expect(g.tieToX).toBe(true);
+    expect(g.budget[0] + g.budget[1]).toBe(20); // total conserved
   });
 });
 
@@ -144,15 +147,19 @@ describe("resolveTurn game over", () => {
 });
 
 describe("resolveTurn budget runs out", () => {
-  it("a player who spends everything can still bid 0 (only wins via tie-break)", () => {
+  it("a player who transfers away everything can still bid 0 (only wins via tie-break)", () => {
     let g = newGame(5);
     ({ game: g } = resolveTurn(g, { bid: 5, cell: 0 }, { bid: 0, cell: 4 }));
-    expect(g.budget[0]).toBe(0);
+    expect(g.budget[0]).toBe(0); // X paid 5 to O
+    expect(g.budget[1]).toBe(10); // O received 5: 5 + 5
     let res;
     ({ game: g, result: res } = resolveTurn(g, { bid: 0, cell: 1 }, { bid: 1, cell: 4 }));
     expect(res.winner).toBe(Mark.O);
     expect(g.board[4]).toBe(Mark.O);
-    expect(() => resolveTurn(g, { bid: 1, cell: 1 }, { bid: 0, cell: 2 })).toThrow(BidExceedsBudgetError);
+    // O transferred 1 to X: [0, 10] -> [1, 9]
+    expect(g.budget).toEqual([1, 9]);
+    // Bidding more than the (now 1) budget must error.
+    expect(() => resolveTurn(g, { bid: 2, cell: 1 }, { bid: 0, cell: 2 })).toThrow(BidExceedsBudgetError);
   });
 });
 

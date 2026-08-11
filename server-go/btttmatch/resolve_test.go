@@ -70,8 +70,8 @@ func TestResolveTurn_PersistsBoardAndBudgets(t *testing.T) {
 	if match.Status != StatusActive {
 		t.Fatalf("Status = %v, want StatusActive", match.Status)
 	}
-	if match.Budget[0] != 15 || match.Budget[1] != 20 {
-		t.Fatalf("Budget = %v, want [15 20]", match.Budget)
+	if match.Budget[0] != 15 || match.Budget[1] != 25 {
+		t.Fatalf("Budget = %v, want [15 25] (X paid 5, transferred to O: 20 + 5 = 25)", match.Budget)
 	}
 	if match.PendingMoves[0] != nil || match.PendingMoves[1] != nil {
 		t.Fatalf("PendingMoves = %v, want both cleared for the next turn", match.PendingMoves)

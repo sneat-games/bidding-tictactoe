@@ -6,6 +6,10 @@
   --bg: #0f172a;
   --fg: #e2e8f0;
   --muted: #94a3b8;
+  --win: #22c55e;
+  --loss: #ef4444;
+  --x-colour: #6366f1;
+  --o-colour: #f59e0b;
 }
 
 html.muted audio, html.muted video { display: none !important; }
@@ -21,9 +25,12 @@ body {
 }
 
 main#app {
-  max-width: 600px;
+  max-width: 900px;
   width: 100%;
   padding: 1.5rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 }
 
 .board {
@@ -88,3 +95,71 @@ button:disabled { opacity: 0.4; cursor: default; }
 .invite-link { word-break: break-all; font-family: mono; }
 .rematch { margin-right: 0.5rem; }
 .menu-btn { background: #475569; }
+
+/* Two-column game screen: board on the left, log on the right. */
+.game-screen {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: 1fr;
+}
+@media (min-width: 720px) {
+  .game-screen {
+    grid-template-columns: minmax(0, 1fr) 300px;
+    align-items: start;
+  }
+}
+.game-screen__board { min-width: 0; }
+.game-screen__log { min-width: 0; }
+
+/* Game log panel. */
+.game-log {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 70vh;
+}
+.game-log__title {
+  margin: 0 0 0.25rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.game-log__budgets { display: flex; flex-direction: column; gap: 0.35rem; margin-bottom: 0.5rem; }
+.game-log__budget { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; }
+.game-log__budget-label { min-width: 7rem; color: var(--muted); }
+.game-log__bar-track {
+  flex: 1;
+  height: 8px;
+  background: #0f172a;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.game-log__bar-fill { height: 100%; border-radius: 4px; transition: width 0.25s; }
+.game-log__bar-fill--x { background: var(--x-colour); }
+.game-log__bar-fill--o { background: var(--o-colour); }
+.game-log__bar-fill--win { background: var(--win); }
+.game-log__bar-fill--loss { background: var(--loss); opacity: 0.7; }
+
+.game-log__entries { display: flex; flex-direction: column; gap: 0.5rem; overflow-y: auto; }
+.game-log__entry {
+  background: #0f172a;
+  border-radius: 6px;
+  padding: 0.5rem;
+  font-size: 0.85rem;
+}
+.game-log__entry-head { margin-bottom: 0.4rem; font-weight: 600; }
+.game-log__turn { color: var(--muted); font-weight: 400; }
+.game-log__tie {
+  background: #475569;
+  color: var(--fg);
+  font-size: 0.7rem;
+  padding: 1px 5px;
+  border-radius: 4px;
+  margin-left: 0.25rem;
+}
+.game-log__bid { display: flex; align-items: center; gap: 0.4rem; margin: 0.2rem 0; }
+.game-log__bid-label { min-width: 5rem; font-size: 0.75rem; color: var(--muted); }
