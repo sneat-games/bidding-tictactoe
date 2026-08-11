@@ -1,0 +1,6 @@
+/dist
+/node_modules
+/.astro
+/.wrangler
+*.log
+.DS_Store

@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "bidding-tictactoe-sneat-games",
+  "main": "index.ts",
+  "compatibility_date": "2025-08-11",
+  "compatibility_flags": ["nodejs_compat", "assets"],
+  "assets": {
+    "directory": "../dist",
+    "binding": "ASSETS"
+  },
+  "routes": [
+    {
+      "pattern": "bidding-tictactoe.sneat.games/*",
+      "custom_domain": true
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

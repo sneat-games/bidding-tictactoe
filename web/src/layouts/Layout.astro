@@ -1,0 +1,20 @@
+---
+import "../styles/global.css";
+// The CrazyGames SDK v3 script tag MUST load before the game code, per
+// https://docs.crazygames.com/sdk/intro/. The SDK is sitelocked and disabled
+// outside the local/crazygames environments, so we unconditionally include
+// it here; the runtime wrapper gates every call by environment.
+const { title = "Bidding Tic-Tac-Toe" } = Astro.props;
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{title}</title>
+    <script src="https://sdk.crazygames.com/crazygames-sdk-v3.js"></script>
+  </head>
+  <body>
+    <slot />
+  </body>
+</html>

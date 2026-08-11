@@ -1,0 +1,14 @@
+---
+import Layout from "../layouts/Layout.astro";
+---
+<Layout title="Bidding Tic-Tac-Toe">
+  <main id="app">
+    <h1>Bidding Tic-Tac-Toe</h1>
+    <p id="status">Loading…</p>
+    <div id="game" aria-live="polite"></div>
+  </main>
+  <script>
+    import { bootstrap } from "../main";
+    bootstrap();
+  </script>
+</Layout>

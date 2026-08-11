@@ -47,6 +47,8 @@ The Cloudflare Worker signaling relay lives at `web/signaling-worker/` and is de
 - `web-app#ac:cf-worker-signaling`: A Cloudflare Worker defined in `web/signaling-worker/` (`index.ts`, `wrangler.jsonc`) with a KV namespace relays SDP + ICE by `roomId` with a 1-minute TTL; documented in `web/README.md`. No DB, no auth, no game state.
 - `web-app#ac:static-dist`: `npm run build` produces a self-contained `dist/` that runs offline from the file system (no fetch required to start a vs-bot match) and is sized for Crazy Games submission.
 - `web-app#ac:typecheck-and-lint`: `npm run typecheck` and `npm run lint` pass on the web workspace with zero errors.
+- `web-app#ac:sneat-games-hosting`: A second Cloudflare Worker (`web/host-worker/`) serves the static `dist/` build at `https://bidding-tictactoe.sneat.games/`, SPA-fallback so the `#room=<code>` share link works with no server route, no legacy Firebase `deploy.yml`.
+- `web-app#ac:share-link-invitation`: An inviter can copy a share link `https://bidding-tictactoe.sneat.games/#room=<6-char-code>`; a friend opening that link is dropped directly into the same match as the guest via the CF Worker signaling relay — no CrazyGames account or Friends drawer required. On CrazyGames the same `roomId` is additionally pushed to `game.updateRoom` so the Friends drawer and invite link work in parallel.
 
 ## Open Questions
 
