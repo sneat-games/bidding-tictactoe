@@ -1,87 +1,82 @@
+/*
+ * Bidding Tic-Tac-Toe — board and BTTT-specific styles only.
+ *
+ * Tokens, base layout (body/.app-shell), the site header, buttons, cards,
+ * bars, badges, the match grid, the end-of-match banner, the menu shell,
+ * the theme toggle and the cross-promo footer all come from
+ * @sneat/game-kit's theme.css (imported below) — see
+ * game-kit/docs/DESIGN.md, "Design system". What's left here is ONLY what
+ * is specific to this game: the 3x3 board itself and its cells, the X/O
+ * mark colours, the win-line highlight, the hover ghost-mark preview, and
+ * the invite-screen card.
+ *
+ * NOTE for maintainers: a handful of rules below (the `.match` grid
+ * columns, `.bid-panel__clock[hidden]`, and the `--x-colour`/`--o-colour`
+ * custom properties) restate something the kit import already provides.
+ * That duplication is deliberate, not a copy/paste slip: this project's
+ * vitest suite (match-screen.test.ts's "layout stylesheet contract" and
+ * "player colours", bid-panel.test.ts's "bid panel stylesheet contract")
+ * reads THIS file's raw text with `fs.readFileSync` to assert the
+ * layout/colour contract, so the rule has to physically live in this file,
+ * not just arrive transitively through `@import`. Both copies say the same
+ * thing; keep them in sync by hand if either changes.
+ */
+
+@import "@sneat/game-kit/theme.css";
+
 :root {
+  /* This game's accent (see DESIGN.md's per-game accent table: BTTT
+     indigo, D&B amber, Hex teal). */
+  --accent: #4f46e5;
+
+  /* The board is always 3x3, so — unlike the kit's generic --board-cells
+     formula, built for boards of different sizes — this can just say so. */
   --cell-size: clamp(60px, 18vw, 110px);
   --cell-gap: 6px;
-  /* The board's own width. The left column of the match grid is set to this,
-     so the balances card above is exactly as wide as the board below it. */
   --board-width: calc(3 * var(--cell-size) + 2 * var(--cell-gap));
-  /* The right column: one width shared by the bid panel and the game log. */
   --side-width: 300px;
   --gap: 1rem;
-  --accent: #4f46e5;
-  --accent-contrant: #fff;
-  --bg: #0f172a;
-  --fg: #e2e8f0;
-  --muted: #94a3b8;
-  --card-bg: #1e293b;
-  --card-border: #334155;
+
   /* One colour per player, used everywhere that player appears: the mark on
-     the board, their balance bar, their bid bar in the log, and their name in
-     prose. Green/red carry no win/loss meaning here — they identify X and O.
-     Every place a colour is used, the mark itself is also written out, so the
-     scheme never carries information on its own. */
+     the board, their balance bar, their bid bar in the log, and their name
+     in prose. Light theme: aliased to the kit's --p1/--p2 (still green/red,
+     see DESIGN.md's "Player colours consistent across games"), which read
+     better against a light surface than this game's original dark-only
+     palette did (~2.3:1 vs ~3.8-4.7:1 here). Every coloured mark is also
+     written out as its letter, so the scheme never carries information on
+     its own. */
+  --x-colour: var(--p1);
+  --o-colour: var(--p2);
+}
+
+/* Dark theme: the exact palette this game shipped with before it had a
+   light theme at all — already tuned for a dark board surface (~7.8:1 /
+   ~4.7:1 contrast against --bg) — kept as-is here rather than switched to
+   the kit's own dark --p1/--p2, so a returning dark-mode player sees no
+   colour shift. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --x-colour: #22c55e;
+    --o-colour: #ef4444;
+  }
+}
+:root[data-theme="dark"] {
   --x-colour: #22c55e;
   --o-colour: #ef4444;
-  /* Outcome colours, for the end-of-match banner only. */
-  --win: #22c55e;
-  --loss: #ef4444;
-  --urgent: #f87171;
-  --accent-hover: #a5b4fc;
 }
 
 html.muted audio, html.muted video { display: none !important; }
 
-body {
-  margin: 0;
-  font-family: system-ui, -apple-system, sans-serif;
-  background: var(--bg);
-  color: var(--fg);
-  display: flex;
-  min-height: 100dvh;
-  justify-content: center;
-}
-
-main#app {
-  /* Sized to the match grid (board + side column + gap + padding) so the
-     heading, the board and the cards all share one left edge. */
-  max-width: 700px;
-  width: 100%;
-  padding: 1.5rem 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: var(--gap);
-}
-
-/* --- site header ------------------------------------------------------ */
-
-.site-header { display: flex; flex-direction: column; gap: 0.15rem; }
-.site-title { margin: 0; font-size: 2rem; line-height: 1.15; }
-.site-title a {
-  color: inherit;
-  text-decoration: none;
-  border-radius: 6px;
-}
-.site-title a:hover { color: var(--accent-hover); }
-.site-title a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-.site-byline { margin: 0; font-size: 0.85rem; color: var(--muted); }
-.site-byline a { color: var(--muted); }
-.site-byline a:hover { color: var(--fg); }
-
 /* --- match screen: 2x2 grid ------------------------------------------- */
-/*
-   ┌──────────────┬──────────────┐
-   │ balances     │ bid panel    │
-   ├──────────────┼──────────────┤
-   │ board        │ game log     │
-   └──────────────┴──────────────┘
-   Source order is balances, bid panel, board, log — which is both the
-   auto-placement order above and the stacking order on narrow screens.
-*/
+/* Restated from the kit for the stylesheet-contract tests — see the note
+   at the top of this file. This game's own wrapper class names
+   (match__balances / match__bid) differ from the kit's generic
+   match-shell.ts ones (match__top-left / match__top-right), so this game
+   maps them onto the same board-width / side-width columns by hand. */
 .match {
   display: grid;
   gap: var(--gap);
   grid-template-columns: minmax(0, 1fr);
-  /* Flush left, so the heading, the balances card and the board share one
-     edge instead of the grid floating in the middle of the page. */
   justify-content: start;
 }
 @media (min-width: 720px) {
@@ -92,81 +87,15 @@ main#app {
 }
 .match__balances, .match__bid, .match__board, .match__log { min-width: 0; }
 
-/* --- cards ------------------------------------------------------------ */
-
-.card {
-  background: var(--card-bg);
-  border: 1px solid var(--card-border);
-  border-radius: 10px;
-  padding: 0.75rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-.card__title {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--muted);
-}
-
-/* Shared progress bars: balances, bid sizes in the log, and the clock. */
-.bar-track {
-  flex: 1;
-  height: 8px;
-  background: var(--bg);
-  border-radius: 4px;
-  overflow: hidden;
-}
-.bar-fill { height: 100%; border-radius: 4px; transition: width 0.25s; }
-.bar-fill--x { background: var(--x-colour); }
-.bar-fill--o { background: var(--o-colour); }
-.bar-fill--win { background: var(--win); }
-.bar-fill--loss { background: var(--loss); }
-
-/* --- balances card ---------------------------------------------------- */
-
-.balances__rows { display: flex; flex-direction: column; gap: 0.35rem; }
-.balances__row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; }
-.balances__label { min-width: 8rem; color: var(--muted); }
-
-/* --- bid panel card --------------------------------------------------- */
-
-.bid-panel__input { display: flex; }
-.bid-panel__hint { margin: 0; font-size: 0.8rem; color: var(--muted); }
-.bid-panel--waiting .bid-panel__hint { color: var(--fg); }
-
-.bid-panel__clock { display: flex; flex-direction: column; gap: 0.3rem; }
-/* An explicit `display` on the same specificity as the UA's `[hidden]` rule
-   wins on source order, so `hidden` needs saying again here or the expired
-   clock stays on screen for the rest of the match. */
+/* Re-states [hidden] for the clock — see the kit's own copy of this rule
+   for why. Duplicated here for the stylesheet-contract test; see the note
+   at the top of this file. */
 .bid-panel__clock[hidden] { display: none; }
-.bid-panel__clock-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 0.5rem;
-  font-size: 0.8rem;
-  color: var(--muted);
-}
-.bid-panel__clock-secs {
-  font-variant-numeric: tabular-nums;
-  font-weight: 700;
-  font-size: 1rem;
-  color: var(--fg);
-}
-.bar-track--clock { flex: none; width: 100%; height: 6px; }
-/* Ticks land every 100ms, so the fill must ease at least that fast or the
-   bar visibly lags the number beside it. */
-.bar-fill--clock { background: var(--accent); transition: width 0.1s linear; }
-.bid-panel__auto { margin: 0; font-size: 0.75rem; color: var(--muted); }
 
-.bid-panel__clock--urgent .bid-panel__clock-secs { color: var(--urgent); }
-.bid-panel__clock--urgent .bar-fill--clock { background: var(--urgent); }
-
-/* --- board ------------------------------------------------------------ */
+/* --- board -------------------------------------------------------------- */
 
 .board {
+  position: relative;
   display: grid;
   grid-template-columns: repeat(3, var(--cell-size));
   grid-template-rows: repeat(3, var(--cell-size));
@@ -175,17 +104,19 @@ main#app {
 }
 
 .board__cell {
+  position: relative;
+  font-family: var(--font-display);
   font-size: 2.5rem;
   font-weight: 700;
-  background: var(--card-bg);
-  border: 2px solid var(--card-border);
+  background: var(--surface);
+  border: 2px solid var(--border);
   border-radius: 8px;
   color: var(--fg);
   cursor: pointer;
-  transition: background 0.15s;
+  transition: background 0.15s ease, border-color 0.15s ease, opacity 0.2s ease, box-shadow 0.2s ease;
 }
 
-.board__cell:not(:disabled):hover { background: #334155; }
+.board__cell:not(:disabled):hover { background: var(--surface-2); border-color: var(--accent); }
 .board__cell[data-mark="X"] { color: var(--x-colour); }
 .board__cell[data-mark="O"] { color: var(--o-colour); }
 /* The mark placed on the most recent turn. */
@@ -195,167 +126,88 @@ main#app {
 }
 .board__cell.selected {
   background: var(--accent);
-  color: var(--accent-contrant);
+  color: var(--accent-contrast);
   border-color: var(--accent);
 }
-.board__cell:disabled { cursor: default; opacity: 0.7; }
+.board__cell:disabled { cursor: default; opacity: 0.85; }
 
-.turn-result {
+/* A brand-new mark pops in rather than just appearing. The kit's global
+   `prefers-reduced-motion: reduce` rule (theme.css, "Motion") collapses
+   this to effectively 0ms, so no separate media query is needed here. */
+@keyframes bttt-mark-pop {
+  from { transform: scale(0.55); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+.board__cell--last[data-mark] { animation: bttt-mark-pop 120ms ease-out; }
+
+/* Win-line highlight at match end: the three winning cells glow, everything
+   else dims. Classes are applied by match-screen.ts from a winning triple
+   computed client-side in src/ui/win-line.ts (a read-only reader of the
+   engine's own LINES table — it never re-derives the rule). */
+.board__cell--win {
+  border-color: currentColor;
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, currentColor 45%, transparent),
+    0 0 16px color-mix(in srgb, currentColor 55%, transparent);
+}
+.board__cell--dim { opacity: 0.35; }
+
+/* Hover preview: a faint ghost of the mark the LOCAL player would place,
+   shown only over an empty, clickable cell. `.board[data-my-mark]` is set
+   by match-screen.ts's renderBoard from the local player's own mark — never
+   the opponent's, so this never leaks who is about to move where. */
+.board__cell:not(:disabled):not([data-mark]):hover::after {
+  position: absolute;
+  inset: 0;
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 0.45rem;
-  padding: 0.5rem 0;
-  margin: 0;
+  justify-content: center;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 2.5rem;
+  opacity: 0.4;
+  pointer-events: none;
 }
-.turn-result__text { color: var(--muted); }
-.turn-result__text strong { color: var(--fg); font-weight: 700; }
+.board[data-my-mark="X"] .board__cell:not(:disabled):not([data-mark]):hover::after {
+  content: "X";
+  color: var(--x-colour);
+}
+.board[data-my-mark="O"] .board__cell:not(:disabled):not([data-mark]):hover::after {
+  content: "O";
+  color: var(--o-colour);
+}
 
-/* A colour-coded X or O, wherever one is named in prose. */
-.mark { font-weight: 800; }
+/* --- turn result / marks / bars, restated on the BTTT x/o names -------- */
+
 .mark--x { color: var(--x-colour); }
 .mark--o { color: var(--o-colour); }
+.bar-fill--x { background: var(--x-colour); }
+.bar-fill--o { background: var(--o-colour); }
 
-.badge {
-  font-size: 0.7rem;
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: #475569;
-  color: var(--fg);
+/* --- end-of-match banner: subtle entrance ------------------------------ */
+
+@keyframes bttt-banner-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
 }
+.match-over { animation: bttt-banner-in 220ms ease-out; }
 
-.error { padding: 0.5rem 0; }
-.error { color: #fca5a5; }
+/* --- invite screen ------------------------------------------------------ */
 
-/* --- end-of-match banner ---------------------------------------------- */
-
-.match-over {
-  margin: 1rem 0;
-  padding: 1rem 1.15rem;
-  border-radius: 10px;
-  border: 1px solid var(--card-border);
-  border-left: 4px solid var(--muted);
-  background: var(--card-bg);
-  display: flex;
-  flex-direction: column;
-  gap: 0.85rem;
-}
-.match-over--win  { border-left-color: var(--win); }
-.match-over--loss { border-left-color: var(--loss); }
-.match-over--draw { border-left-color: var(--o-colour); }
-
-.match-over__headline {
-  margin: 0;
-  font-size: 1.4rem;
-  font-weight: 800;
-  line-height: 1.2;
-  letter-spacing: -0.01em;
-}
-.match-over--win  .match-over__headline { color: var(--win); }
-.match-over--loss .match-over__headline { color: var(--loss); }
-.match-over--draw .match-over__headline { color: var(--o-colour); }
-
-.match-over__balances {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid var(--card-border);
-}
-.match-over__balance {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  align-items: baseline;
-  gap: 0.6rem;
-}
-.match-over__balance-label { color: var(--muted); font-size: 0.9rem; }
-.match-over__balance-value {
-  font-size: 1.1rem;
+.invite-card { align-items: center; text-align: center; max-width: 420px; margin: 2rem auto; }
+.invite-card__status { margin: 0; color: var(--muted); }
+.invite-code {
+  font-family: var(--font-display);
+  font-size: 1.8rem;
   font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-.match-over__balance-delta {
-  font-size: 0.8rem;
-  font-variant-numeric: tabular-nums;
-  min-width: 3.5em;
-  text-align: right;
-}
-.match-over__balance-delta--up { color: var(--win); }
-.match-over__balance-delta--down { color: var(--loss); }
-
-.match__controls .rematch, .match__controls .menu-btn { margin-top: 0.25rem; }
-
-/* --- bid input -------------------------------------------------------- */
-
-.bid-input {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  width: 100%;
-}
-.bid-input label { display: flex; align-items: center; gap: 0.5rem; width: 100%; }
-.bid-input__slider { accent-color: var(--accent); flex: 1; min-width: 0; }
-.bid-input__number { width: 4.5em; }
-.bid-input--disabled { opacity: 0.5; }
-
-button {
-  background: var(--accent);
-  color: var(--accent-contrant);
-  border: none;
-  padding: 0.5rem 1rem;
-  border-radius: 6px;
+  letter-spacing: 0.14em;
+  padding: 0.5rem 1.25rem;
+  border-radius: 10px;
+  border: 1px dashed var(--border);
+  background: var(--surface-2);
+  color: var(--accent);
   cursor: pointer;
-  font-size: 1rem;
 }
-button:disabled { opacity: 0.4; cursor: default; }
-
-.menu { display: flex; flex-direction: column; gap: 0.75rem; align-items: center; }
-.menu__btn { min-width: 200px; }
-.menu__btn--leave { background: #475569; }
-
-.invite-link { word-break: break-all; font-family: monospace; }
-.rematch { margin-right: 0.5rem; }
-.menu-btn { background: #475569; }
-
-/* --- game log card ---------------------------------------------------- */
-
-.game-log { max-height: 60vh; }
-.game-log__entries {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  overflow-y: auto;
-}
-.game-log__entry {
-  background: var(--bg);
-  border-radius: 6px;
-  padding: 0.5rem;
-  font-size: 0.85rem;
-}
-.game-log__entry-head { margin-bottom: 0.4rem; font-weight: 600; }
-.game-log__turn { color: var(--muted); font-weight: 400; }
-.game-log__tie {
-  background: #475569;
-  color: var(--fg);
-  font-size: 0.7rem;
-  padding: 1px 5px;
-  border-radius: 4px;
-  margin-left: 0.25rem;
-}
-.game-log__bid { display: flex; align-items: center; gap: 0.4rem; margin: 0.2rem 0; }
-.game-log__bid-label { min-width: 5.5rem; font-size: 0.75rem; color: var(--muted); }
-/* The bars are coloured by PLAYER, so who won the turn is carried by weight
-   rather than by hue. */
-.game-log__bid--lost { opacity: 0.45; }
-.game-log__bid--won .game-log__bid-label { color: var(--fg); font-weight: 600; }
-.game-log__bid-won-marker { color: var(--muted); font-size: 0.7rem; }
-
-/* --- in-match actions ------------------------------------------------- */
-
-.match__actions { margin-top: 0.75rem; }
-.match__actions[hidden] { display: none; }
-/* The armed state of "New game" — one more click and the match is gone. */
-.match__actions .is-armed {
-  background: var(--loss);
-  color: #fff;
-}
+.invite-code:hover { border-color: var(--accent); }
+.invite-code:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.invite-link { word-break: break-all; font-family: monospace; font-size: 0.8rem; color: var(--muted); }

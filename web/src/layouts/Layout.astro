@@ -12,7 +12,17 @@ import "../styles/global.css";
 //
 // `preconnect` is a hint, not a fetch: it warms the TLS handshake for the
 // surfaces that will ask for the SDK, and costs nothing on those that won't.
+//
+// Everything else added to this head (meta tags, the inline theme script,
+// the data-URI favicon) is static and local — zero third-party requests, so
+// `web-app#ac:instant-menu` (the mode-select menu never waits on a
+// third-party request) is unaffected.
 const { title = "Bidding Tic-Tac-Toe" } = Astro.props;
+const description =
+  "Bidding Tic-Tac-Toe: classic tic-tac-toe with a twist — secretly bid coins for the square you want. Play instantly vs the bot, or invite a friend. Free, in your browser.";
+// Inline SVG favicon: a circle (⭕) on the game's indigo accent.
+const favicon =
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%234f46e5'/%3E%3Ccircle cx='32' cy='32' r='18' fill='none' stroke='white' stroke-width='7'/%3E%3C/svg%3E";
 ---
 <!doctype html>
 <html lang="en">
@@ -20,7 +30,37 @@ const { title = "Bidding Tic-Tac-Toe" } = Astro.props;
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{title}</title>
+    <meta name="description" content={description} />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Sneat Games" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content="https://bidding-tictactoe.sneat.games/" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f8fafc" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f172a" />
+    <link rel="icon" href={favicon} />
     <link rel="preconnect" href="https://sdk.crazygames.com" crossorigin />
+    <script is:inline>
+      // Pre-paint theme application, so the page never flashes the wrong
+      // theme. Mirrors @sneat/game-kit's ui/theme.ts (initTheme/setTheme)
+      // exactly, but inlined rather than imported: an ES module import here
+      // is deferred past first paint, which is precisely the flash this
+      // exists to avoid. An explicit stored choice ("light"/"dark") sets
+      // data-theme; anything else (nothing stored, i.e. "system") leaves the
+      // attribute off and theme.css's prefers-color-scheme query decides —
+      // same semantics as theme.ts's getThemePreference().
+      (function () {
+        try {
+          var v = localStorage.getItem("sneat-games-theme");
+          if (v === "light" || v === "dark") {
+            document.documentElement.setAttribute("data-theme", v);
+          }
+        } catch {
+          // Storage can throw (private browsing, disabled storage) — fall
+          // back to the prefers-color-scheme default rather than block boot.
+        }
+      })();
+    </script>
   </head>
   <body>
     <slot />

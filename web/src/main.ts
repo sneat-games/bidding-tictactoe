@@ -11,12 +11,18 @@
 // (full SDK).
 
 import { initSdk, isSdkAvailable, isInstantMultiplayer, inviteParams, addSettingsChangeListener, getSettings, gameplayStart, gameplayStop, loadingStart, loadingStop, leftRoom } from "./crazygames/sdk";
+import { createThemeToggle, createGamesFooter } from "@sneat/game-kit";
 import { roomIdFromLocation } from "./pvp/room";
 import { renderMenu } from "./ui/menu";
 import { runVsBot } from "./ui/vs-bot";
 import { runVsFriend } from "./ui/vs-friend";
 
 export async function bootstrap() {
+  // Mounted synchronously, first — no network, no SDK, so neither ever
+  // delays (or is delayed by) the instant-menu path below.
+  mountThemeToggle();
+  mountGamesFooter();
+
   loadingStart();
   try {
     await initSdk();
@@ -75,6 +81,24 @@ export async function bootstrap() {
   } else if (choice === "leave") {
     leftRoom();
   }
+}
+
+/** Mount the light/dark toggle into the site header's slot (see
+ *  index.astro). The pre-paint <script> in Layout.astro already applies
+ *  whatever theme is stored, so this only needs to reflect and toggle it —
+ *  no flash, no dependency on anything async. */
+function mountThemeToggle() {
+  const slot = document.getElementById("theme-toggle-slot");
+  if (!slot) return;
+  slot.replaceWith(createThemeToggle().el);
+}
+
+/** Cross-promotion footer (see @sneat/game-kit's games-footer.ts):
+ *  "More from Sneat Games", linking every other kit game plus the
+ *  sneat.games landing page. Persistent across menu/match/invite screens,
+ *  same as the header above it. */
+function mountGamesFooter() {
+  document.getElementById("app")?.append(createGamesFooter({ current: "bidding-tictactoe" }));
 }
 
 function applySettings(s: { disableChat?: boolean; muteAudio?: boolean }) {
