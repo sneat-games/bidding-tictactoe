@@ -48,8 +48,11 @@ export function emptyBoard(): Board {
   return [Mark.Empty, Mark.Empty, Mark.Empty, Mark.Empty, Mark.Empty, Mark.Empty, Mark.Empty, Mark.Empty, Mark.Empty];
 }
 
-// lines are the eight winning triples (rows, columns, diagonals).
-const LINES: ReadonlyArray<readonly [number, number, number]> = [
+// LINES are the eight winning triples (rows, columns, diagonals). Exported
+// read-only for the UI layer (see src/ui/win-line.ts), which highlights the
+// winning triple at match end — it only ever reads this table, never
+// re-derives or mutates the rule it encodes.
+export const LINES: ReadonlyArray<readonly [number, number, number]> = [
   [0, 1, 2], [3, 4, 5], [6, 7, 8], // rows
   [0, 3, 6], [1, 4, 7], [2, 5, 8], // columns
   [0, 4, 8], [2, 4, 6], // diagonals
