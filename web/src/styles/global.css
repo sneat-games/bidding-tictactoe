@@ -1,15 +1,24 @@
 :root {
   --cell-size: clamp(60px, 18vw, 110px);
   --cell-gap: 6px;
+  /* The board's own width. The left column of the match grid is set to this,
+     so the balances card above is exactly as wide as the board below it. */
+  --board-width: calc(3 * var(--cell-size) + 2 * var(--cell-gap));
+  /* The right column: one width shared by the bid panel and the game log. */
+  --side-width: 300px;
+  --gap: 1rem;
   --accent: #4f46e5;
   --accent-contrant: #fff;
   --bg: #0f172a;
   --fg: #e2e8f0;
   --muted: #94a3b8;
+  --card-bg: #1e293b;
+  --card-border: #334155;
   --win: #22c55e;
   --loss: #ef4444;
   --x-colour: #6366f1;
   --o-colour: #f59e0b;
+  --urgent: #f87171;
 }
 
 html.muted audio, html.muted video { display: none !important; }
@@ -25,13 +34,115 @@ body {
 }
 
 main#app {
-  max-width: 900px;
+  /* Sized to the match grid (board + side column + gap + padding) so the
+     heading, the board and the cards all share one left edge. */
+  max-width: 700px;
   width: 100%;
   padding: 1.5rem 1rem;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: var(--gap);
 }
+
+/* --- match screen: 2x2 grid ------------------------------------------- */
+/*
+   ┌──────────────┬──────────────┐
+   │ balances     │ bid panel    │
+   ├──────────────┼──────────────┤
+   │ board        │ game log     │
+   └──────────────┴──────────────┘
+   Source order is balances, bid panel, board, log — which is both the
+   auto-placement order above and the stacking order on narrow screens.
+*/
+.match {
+  display: grid;
+  gap: var(--gap);
+  grid-template-columns: minmax(0, 1fr);
+  /* Flush left, so the heading, the balances card and the board share one
+     edge instead of the grid floating in the middle of the page. */
+  justify-content: start;
+}
+@media (min-width: 720px) {
+  .match {
+    grid-template-columns: var(--board-width) var(--side-width);
+    align-items: start;
+  }
+}
+.match__balances, .match__bid, .match__board, .match__log { min-width: 0; }
+
+/* --- cards ------------------------------------------------------------ */
+
+.card {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.card__title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* Shared progress bars: balances, bid sizes in the log, and the clock. */
+.bar-track {
+  flex: 1;
+  height: 8px;
+  background: var(--bg);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.bar-fill { height: 100%; border-radius: 4px; transition: width 0.25s; }
+.bar-fill--x { background: var(--x-colour); }
+.bar-fill--o { background: var(--o-colour); }
+.bar-fill--win { background: var(--win); }
+.bar-fill--loss { background: var(--loss); opacity: 0.7; }
+
+/* --- balances card ---------------------------------------------------- */
+
+.balances__rows { display: flex; flex-direction: column; gap: 0.35rem; }
+.balances__row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; }
+.balances__label { min-width: 8rem; color: var(--muted); }
+
+/* --- bid panel card --------------------------------------------------- */
+
+.bid-panel__input { display: flex; }
+.bid-panel__hint { margin: 0; font-size: 0.8rem; color: var(--muted); }
+.bid-panel--waiting .bid-panel__hint { color: var(--fg); }
+
+.bid-panel__clock { display: flex; flex-direction: column; gap: 0.3rem; }
+/* An explicit `display` on the same specificity as the UA's `[hidden]` rule
+   wins on source order, so `hidden` needs saying again here or the expired
+   clock stays on screen for the rest of the match. */
+.bid-panel__clock[hidden] { display: none; }
+.bid-panel__clock-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.bid-panel__clock-secs {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--fg);
+}
+.bar-track--clock { flex: none; width: 100%; height: 6px; }
+/* Ticks land every 100ms, so the fill must ease at least that fast or the
+   bar visibly lags the number beside it. */
+.bar-fill--clock { background: var(--accent); transition: width 0.1s linear; }
+.bid-panel__auto { margin: 0; font-size: 0.75rem; color: var(--muted); }
+
+.bid-panel__clock--urgent .bid-panel__clock-secs { color: var(--urgent); }
+.bid-panel__clock--urgent .bar-fill--clock { background: var(--urgent); }
+
+/* --- board ------------------------------------------------------------ */
 
 .board {
   display: grid;
@@ -39,14 +150,13 @@ main#app {
   grid-template-rows: repeat(3, var(--cell-size));
   gap: var(--cell-gap);
   justify-content: center;
-  margin: 1.5rem auto;
 }
 
 .board__cell {
   font-size: 2.5rem;
   font-weight: 700;
-  background: #1e293b;
-  border: 2px solid #334155;
+  background: var(--card-bg);
+  border: 2px solid var(--card-border);
   border-radius: 8px;
   color: var(--fg);
   cursor: pointer;
@@ -61,21 +171,22 @@ main#app {
 }
 .board__cell:disabled { cursor: default; opacity: 0.7; }
 
-.status, .turn-result, .result-banner, .error { padding: 0.5rem 0; }
+.turn-result, .result-banner, .error { padding: 0.5rem 0; }
 .result-banner { font-size: 1.25rem; font-weight: 700; }
 .error { color: #fca5a5; }
 
+/* --- bid input -------------------------------------------------------- */
+
 .bid-input {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin: 0 0.5rem;
+  width: 100%;
 }
-.bid-input__slider { accent-color: var(--accent); }
-.bid-input__number { width: 5em; }
+.bid-input label { display: flex; align-items: center; gap: 0.5rem; width: 100%; }
+.bid-input__slider { accent-color: var(--accent); flex: 1; min-width: 0; }
+.bid-input__number { width: 4.5em; }
 .bid-input--disabled { opacity: 0.5; }
-
-.prompt { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin: 1rem 0; }
 
 button {
   background: var(--accent);
@@ -92,61 +203,21 @@ button:disabled { opacity: 0.4; cursor: default; }
 .menu__btn { min-width: 200px; }
 .menu__btn--leave { background: #475569; }
 
-.invite-link { word-break: break-all; font-family: mono; }
+.invite-link { word-break: break-all; font-family: monospace; }
 .rematch { margin-right: 0.5rem; }
 .menu-btn { background: #475569; }
 
-/* Two-column game screen: board on the left, log on the right. */
-.game-screen {
-  display: grid;
-  gap: 1rem;
-  grid-template-columns: 1fr;
-}
-@media (min-width: 720px) {
-  .game-screen {
-    grid-template-columns: minmax(0, 1fr) 300px;
-    align-items: start;
-  }
-}
-.game-screen__board { min-width: 0; }
-.game-screen__log { min-width: 0; }
+/* --- game log card ---------------------------------------------------- */
 
-/* Game log panel. */
-.game-log {
-  background: #1e293b;
-  border: 1px solid #334155;
-  border-radius: 10px;
-  padding: 0.75rem;
+.game-log { max-height: 60vh; }
+.game-log__entries {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  max-height: 70vh;
+  overflow-y: auto;
 }
-.game-log__title {
-  margin: 0 0 0.25rem;
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--muted);
-}
-.game-log__budgets { display: flex; flex-direction: column; gap: 0.35rem; margin-bottom: 0.5rem; }
-.game-log__budget { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; }
-.game-log__budget-label { min-width: 7rem; color: var(--muted); }
-.game-log__bar-track {
-  flex: 1;
-  height: 8px;
-  background: #0f172a;
-  border-radius: 4px;
-  overflow: hidden;
-}
-.game-log__bar-fill { height: 100%; border-radius: 4px; transition: width 0.25s; }
-.game-log__bar-fill--x { background: var(--x-colour); }
-.game-log__bar-fill--o { background: var(--o-colour); }
-.game-log__bar-fill--win { background: var(--win); }
-.game-log__bar-fill--loss { background: var(--loss); opacity: 0.7; }
-
-.game-log__entries { display: flex; flex-direction: column; gap: 0.5rem; overflow-y: auto; }
 .game-log__entry {
-  background: #0f172a;
+  background: var(--bg);
   border-radius: 6px;
   padding: 0.5rem;
   font-size: 0.85rem;

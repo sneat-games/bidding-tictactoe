@@ -1,0 +1,58 @@
+# CI for the web/ workspace.
+#
+# The repo previously had Go CI only, so nothing ever ran `npm ci` for the
+# web app: two devDependency pins drifted into a state where BOTH `npm ci`
+# and `npm install` failed outright on main, and no build, lint or test had
+# run against the web workspace for as long as that was true.
+#
+# `npm ci` is deliberately first and unforgiving (no --legacy-peer-deps): a
+# lockfile that cannot be installed from a clean checkout is the failure this
+# job exists to catch.
+
+name: Web CI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'web/**'
+      - '.github/workflows/web-ci.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'web/**'
+      - '.github/workflows/web-ci.yml'
+
+defaults:
+  run:
+    working-directory: web
+
+jobs:
+  web:
+    name: typecheck, lint, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install from the lockfile
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm run test
+
+      - name: Build
+        run: npm run build

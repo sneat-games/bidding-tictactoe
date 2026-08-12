@@ -35,7 +35,11 @@ export interface PeerHandle {
   send(msg: WireMessage): void;
   close(): void;
   onMessage(cb: (msg: WireMessage) => void): void;
+  /** Unregister a message callback. A finished turn MUST call this, or its
+   *  stale handler keeps firing against a board that has moved on. */
+  offMessage(cb: (msg: WireMessage) => void): void;
   onClose(cb: () => void): void;
+  offClose(cb: () => void): void;
 }
 
 const SIGNALING_BASE = ((import.meta as { env?: { SIGNALING_BASE?: string } }).env?.SIGNALING_BASE) ??
@@ -213,15 +217,17 @@ function makeHandle(
   dc.addEventListener("message", (e) => {
     try {
       const msg = JSON.parse(e.data) as WireMessage;
-      for (const cb of msgCbs) cb(msg);
+      // Snapshot: a handler commonly unregisters itself and registers the
+      // next turn's from inside this loop.
+      for (const cb of [...msgCbs]) cb(msg);
     } catch (err) {
       console.warn("[pvp] dropped malformed message", err);
     }
   });
-  dc.addEventListener("close", () => { for (const cb of closeCbs) cb(); });
+  dc.addEventListener("close", () => { for (const cb of [...closeCbs]) cb(); });
   pc.addEventListener("connectionstatechange", () => {
     if (pc.connectionState === "failed" || pc.connectionState === "closed") {
-      for (const cb of closeCbs) cb();
+      for (const cb of [...closeCbs]) cb();
     }
   });
   return {
@@ -237,7 +243,9 @@ function makeHandle(
       try { pc.close(); } catch { /* noop */ }
     },
     onMessage(cb) { msgCbs.add(cb); },
+    offMessage(cb) { msgCbs.delete(cb); },
     onClose(cb) { closeCbs.add(cb); },
+    offClose(cb) { closeCbs.delete(cb); },
   };
 }
 

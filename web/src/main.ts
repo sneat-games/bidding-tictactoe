@@ -31,6 +31,10 @@ export async function bootstrap() {
     loadingStop();
   }
 
+  // The boot placeholder has done its job; leaving it up makes a running
+  // match look like it is still loading.
+  document.getElementById("status")?.remove();
+
   const root = document.getElementById("game")!;
   root.innerHTML = "";
 

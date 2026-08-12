@@ -1,81 +1,86 @@
-// vs-bot screen. Renders the board, the bid input (linked slider + number),
-// the turn result, and a right-side game log with bid-size progress bars.
-// A rematch restarts in the same tab (and clears the log).
+// vs-bot screen. Renders the 2x2 match screen (balances + bid panel on top,
+// board + game log below) and plays the human against the TS bot strategy.
+// A rematch restarts in the same tab and clears the log.
+//
+// The bot's hidden bid is computed BEFORE the human is asked, which is what
+// makes its bid "in" for the turn clock: the human always answers the 10s
+// clock in this mode, and the 30s stall cap can never apply.
 
-import { Mark, Outcome, boardOutcome, newGame, resolveTurn, markString, outcomeString, Move } from "../engine/btttplay";
+import { Mark, Outcome, boardOutcome, newGame, resolveTurn, markString, outcomeString, Game, Move } from "../engine/btttplay";
 import { botMove } from "../bot/bot";
-import { createBidInput } from "./bid-input";
-import { createGameLog } from "./game-log";
+import { askMove } from "./ask-move";
+import { createMatchScreen, turnResultText, type MatchScreen } from "./match-screen";
 
 const BUDGET = 100;
 
 export async function runVsBot(root: HTMLElement): Promise<void> {
+  const human: Mark = Mark.X;
+  const bot: Mark = Mark.O;
+  const screen = createMatchScreen({
+    root,
+    initialBudget: BUDGET,
+    xLabel: `You (${markString(human)})`,
+    oLabel: `Bot (${markString(bot)})`,
+  });
+
   let game = newGame(BUDGET);
-  let human: Mark = Mark.X;
-  let botMark: Mark = Mark.O;
   let turn = 0;
 
-  // Two-column layout: board area (left) + game log (right).
-  root.innerHTML = "";
-  const screen = document.createElement("div");
-  screen.className = "game-screen";
-  const boardArea = document.createElement("div");
-  boardArea.className = "game-screen__board";
-  const logArea = document.createElement("div");
-  logArea.className = "game-screen__log";
-  const log = createGameLog({
-    initialBudget: BUDGET,
-    xLabel: "You",
-    oLabel: "Bot",
-  });
-  logArea.append(log.el);
-  screen.append(boardArea, logArea);
-  root.append(screen);
-
-  while (true) {
-    const outcome = await playOneTurn(boardArea, game, human, botMark, log, turn);
-    if (outcome !== Outcome.Ongoing) {
-      const again = await renderResult(boardArea, outcome, game);
-      if (!again) return;
-      game = newGame(BUDGET);
-      human = Mark.X;
-      botMark = Mark.O;
-      turn = 0;
-      log.clear();
-    } else {
+  for (;;) {
+    const outcome = await playOneTurn(screen, game, human, bot, turn);
+    if (outcome === Outcome.Ongoing) {
       turn++;
+      continue;
     }
+    const again = await renderResult(screen, outcome, game, human);
+    if (!again) return;
+    game = newGame(BUDGET);
+    turn = 0;
+    screen.reset();
   }
 }
 
 async function playOneTurn(
-  root: HTMLElement,
-  game: ReturnType<typeof newGame>,
+  screen: MatchScreen,
+  game: Game,
   human: Mark,
-  botMark: Mark,
-  log: ReturnType<typeof createGameLog>,
+  bot: Mark,
   turn: number,
 ): Promise<Outcome> {
-  renderBoard(root, game, human, botMark);
-  // Wait for human's move.
-  const humanMove = await askHuman(root, game, human);
-  // Bot picks its move.
-  const botMoveData = botMove({
+  const humanIdx = human === Mark.X ? 0 : 1;
+  const botIdx = humanIdx === 0 ? 1 : 0;
+
+  screen.renderBoard(game.board);
+
+  // The bot commits first (hidden), so its bid is already in when the human
+  // is asked — see the module comment.
+  const botChoice = botMove({
     board: game.board,
-    budgetRemaining: game.budget[botMark === Mark.X ? 0 : 1],
-    me: botMark,
+    budgetRemaining: game.budget[botIdx],
+    me: bot,
   });
-  const xMove: Move = human === Mark.X ? humanMove : botMoveData;
-  const oMove: Move = human === Mark.X ? botMoveData : humanMove;
+
+  const humanChoice = await askMove({
+    boardArea: screen.boardArea,
+    bidPanel: screen.bidPanel,
+    board: game.board,
+    me: human,
+    ownBalance: game.budget[humanIdx],
+    opponentBalance: game.budget[botIdx],
+    opponentBidIn: true,
+  });
+
+  const xMove: Move = human === Mark.X ? humanChoice : botChoice;
+  const oMove: Move = human === Mark.X ? botChoice : humanChoice;
   const budgetsBefore: [number, number] = [game.budget[0], game.budget[1]];
+
   try {
     const { game: next, result } = resolveTurn(game, xMove, oMove);
     Object.assign(game, next);
-    // Re-render the board with the post-move state so the winning mark
-    // is visible (and the prompt/submit UI is cleared).
-    renderBoard(root, game, human, botMark);
-    renderTurnResult(root, result, game, human);
-    log.append({
+    // Re-render with the post-move state so the winning mark is visible.
+    screen.renderBoard(game.board);
+    screen.setNote(turnResultText(result));
+    screen.appendTurn({
       turn,
       result,
       xMove,
@@ -85,100 +90,38 @@ async function playOneTurn(
     });
     return boardOutcome(game.board);
   } catch (e) {
-    renderError(root, e instanceof Error ? e.message : String(e));
+    screen.setNote(`Invalid move: ${e instanceof Error ? e.message : String(e)}`, "error");
     return Outcome.Ongoing;
   }
 }
 
-function renderBoard(root: HTMLElement, game: ReturnType<typeof newGame>, human: Mark, botMark: Mark) {
-  root.innerHTML = "";
-  const board = document.createElement("div");
-  board.className = "board";
-  board.setAttribute("role", "grid");
-  for (let i = 0; i < 9; i++) {
-    const cell = document.createElement("button");
-    cell.type = "button";
-    cell.className = "board__cell";
-    cell.setAttribute("data-cell", String(i));
-    cell.textContent = markString(game.board[i]);
-    if (game.board[i] !== 0 /* Empty */) cell.disabled = true;
-    board.appendChild(cell);
-  }
-  const status = document.createElement("p");
-  status.className = "status";
-  status.textContent = `You are ${markString(human)}. Budgets — You: ${game.budget[human === Mark.X ? 0 : 1]}, Bot: ${game.budget[botMark === Mark.X ? 0 : 1]}.`;
-  root.append(board, status);
-}
-
-async function askHuman(
-  root: HTMLElement,
-  game: ReturnType<typeof newGame>,
-  human: Mark,
-): Promise<{ bid: number; cell: number }> {
-  const remaining = game.budget[human === Mark.X ? 0 : 1];
-  const bid = createBidInput({ max: remaining, initial: Math.floor(remaining / 2) });
-
-  const prompt = document.createElement("div");
-  prompt.className = "prompt";
-  prompt.append("Pick your bid, then click a cell to commit:", bid.el);
-  root.append(prompt);
-
-  let chosenCell: number | null = null;
-  const cells = root.querySelectorAll<HTMLButtonElement>(".board__cell");
-  return new Promise((resolve) => {
-    cells.forEach((c) => {
-      if (c.disabled) return;
-      c.addEventListener("click", () => {
-        chosenCell = parseInt(c.dataset.cell ?? "", 10);
-        if (chosenCell !== null) {
-          resolve({ bid: bid.value(), cell: chosenCell });
-        }
-      });
-    });
-  });
-}
-
-function renderTurnResult(
-  root: HTMLElement,
-  result: ReturnType<typeof resolveTurn>["result"],
-  game: ReturnType<typeof newGame>,
-  human: Mark,
-) {
-  const line = document.createElement("p");
-  line.className = "turn-result";
-  const tieNote = result.tieBreak ? " (tie-break)" : "";
-  line.textContent = `${markString(result.winner)} won the turn, took cell ${result.cell}, paid ${result.bid}${tieNote}.`;
-  root.append(line);
-  void game;
-  void human;
-}
 
 function renderResult(
-  root: HTMLElement,
+  screen: MatchScreen,
   outcome: Outcome,
-  game: ReturnType<typeof newGame>,
+  game: Game,
+  human: Mark,
 ): Promise<boolean> {
+  screen.bidPanel.setWaiting("Match over.");
+
+  const humanIdx = human === Mark.X ? 0 : 1;
   const banner = document.createElement("p");
   banner.className = "result-banner";
-  banner.textContent = `Game over: ${outcomeString(outcome)}. Budgets — You: ${game.budget[0]}, Bot: ${game.budget[1]}.`;
+  banner.textContent = `Game over: ${outcomeString(outcome)}. Balances — You: ${game.budget[humanIdx]}, Bot: ${game.budget[humanIdx === 0 ? 1 : 0]}.`;
+
   const again = document.createElement("button");
   again.type = "button";
   again.textContent = "Rematch";
   again.className = "rematch";
+
   const leave = document.createElement("button");
   leave.type = "button";
   leave.textContent = "Back to menu";
   leave.className = "menu-btn";
-  root.append(banner, again, leave);
+
+  screen.controls.append(banner, again, leave);
   return new Promise((resolve) => {
     again.addEventListener("click", () => resolve(true));
     leave.addEventListener("click", () => resolve(false));
   });
-}
-
-function renderError(root: HTMLElement, message: string) {
-  const err = document.createElement("p");
-  err.className = "error";
-  err.textContent = `Invalid move: ${message}`;
-  root.append(err);
 }
