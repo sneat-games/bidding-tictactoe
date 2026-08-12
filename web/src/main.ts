@@ -47,40 +47,59 @@ export async function bootstrap() {
   root.innerHTML = "";
 
   // 1. Invite-link join (sneat.games share-link OR CrazyGames invite link).
+  //    Entry paths 1 and 2 run ONCE, then fall through into the menu loop —
+  //    a guest whose match ends should land on the menu, not on a dead
+  //    board. The spent `#room=` fragment is dropped first so the next loop
+  //    iteration doesn't rejoin the room that just finished.
   const fromLink = roomIdFromLocation();
   if (fromLink) {
     const cgParams = inviteParams();
     if (cgParams && cgParams.room === fromLink) {
       console.debug("[boot] join via CrazyGames invite link");
     }
+    clearRoomFragment();
     gameplayStart();
     await runVsFriend(root, { as: "guest", roomId: fromLink });
     gameplayStop();
-    return;
-  }
-
-  // 2. CrazyGames instant-multiplayer: drop straight into a new joinable
-  //    private room.
-  if (isSdkAvailable() && isInstantMultiplayer()) {
+  } else if (isSdkAvailable() && isInstantMultiplayer()) {
+    // 2. CrazyGames instant-multiplayer: drop straight into a new joinable
+    //    private room.
     gameplayStart();
     await runVsFriend(root, { as: "host" });
     gameplayStop();
-    return;
   }
 
-  // 3. Mode-select menu.
-  const choice = await renderMenu(root);
-  if (choice === "vs-bot") {
-    gameplayStart();
-    await runVsBot(root);
-    gameplayStop();
-  } else if (choice === "vs-friend") {
-    gameplayStart();
-    await runVsFriend(root, { as: "host" });
-    gameplayStop();
-  } else if (choice === "leave") {
-    leftRoom();
+  // 3. Mode-select menu — a LOOP, not a one-shot. Every session resolves
+  //    when the player leaves it ("Menu" after a match, "Leave" in the
+  //    menu), and before this loop existed `bootstrap` simply returned at
+  //    that point: the finished board stayed on screen forever and the
+  //    control looked dead, with the header title link (a page reload) the
+  //    only way out. The same one-shot shape shipped in all eight sibling
+  //    games; see game-kit/docs/APP-PLAYBOOK.md.
+  for (;;) {
+    root.innerHTML = "";
+    const choice = await renderMenu(root);
+    if (choice === "vs-bot") {
+      gameplayStart();
+      await runVsBot(root);
+      gameplayStop();
+    } else if (choice === "vs-friend") {
+      gameplayStart();
+      await runVsFriend(root, { as: "host" });
+      gameplayStop();
+    } else if (choice === "leave") {
+      leftRoom();
+      // Nothing to navigate to off-platform: re-render the menu rather
+      // than leaving a blank page behind.
+    }
   }
+}
+
+/** Drop a spent `#room=` fragment so a finished invite-link session cannot
+ *  be re-entered by the menu loop (or by a reload). */
+function clearRoomFragment(): void {
+  if (!window.location.hash) return;
+  window.history.replaceState(null, "", window.location.pathname + window.location.search);
 }
 
 /** Mount the light/dark toggle into the site header's slot (see
