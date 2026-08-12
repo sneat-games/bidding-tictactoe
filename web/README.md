@@ -108,14 +108,37 @@ the pending auto-bid is shown in the bid panel before it fires.
 The clock is a session-layer rule — `resolveTurn` already discards the loser's
 cell, so neither `server-go/btttplay` nor its TS port changes to support it.
 
+## Theme
+
+Light and dark themes, following the system preference by default, with a
+toggle in the site header (`@sneat/game-kit`'s `createThemeToggle()`, mounted
+in `main.ts`). A pre-paint `<script>` in `Layout.astro` applies a stored
+choice before first paint, so switching (or reloading with an explicit
+choice already stored) never flashes the wrong theme. The choice persists to
+`localStorage["sneat-games-theme"]`.
+
 ## Colours
 
 One colour per player, used everywhere that player appears — the mark on the
 board, their balance bar, their bid bar in the log, and their name in prose:
-**X is green, O is red**. Green and red carry no win/loss meaning in the log;
-the winning bid is marked by weight and a `✓` instead. Every coloured mark is
-also written out as its letter, so the scheme never carries information on its
-own.
+**X is green, O is red** in both themes. Green and red carry no win/loss
+meaning in the log; the winning bid is marked by weight and a `✓` instead.
+Every coloured mark is also written out as its letter, so the scheme never
+carries information on its own.
+
+| | Light | Dark |
+|---|---|---|
+| X | `#059669` (kit `--p1`) | `#22c55e` (this game's original palette) |
+| O | `#e11d48` (kit `--p2`) | `#ef4444` (this game's original palette) |
+
+Light-theme X/O are aliased to `@sneat/game-kit`'s `--p1`/`--p2` tokens
+(`--x-colour`/`--o-colour` in `src/styles/global.css`), which read better
+against a light surface (~3.8:1 / ~4.7:1 contrast) than this game's original
+dark-tuned hex codes would (~2.3:1 on white). Dark-theme X/O keep the exact
+palette this game shipped with before it had a light theme at all — already
+~7.8:1 / ~4.7:1 against the dark surface — rather than switching to the
+kit's own (different) dark `--p1`/`--p2`, so a returning dark-mode player
+sees no colour shift.
 
 ## CrazyGames submission
 
@@ -148,7 +171,12 @@ web/
 │   │                  turn-inbox.ts (per-turn message buffer)
 │   ├── ui/            match-screen (2x2 layout), balances, bid-panel,
 │   │                  game-log, bid-input, turn-clock, ask-move, menu,
-│   │                  vs-bot + vs-friend screens
+│   │                  win-line (end-of-match highlight), vs-bot + vs-friend
+│   │                  screens
+│   ├── styles/        global.css — @sneat/game-kit's theme.css (design
+│   │                  tokens, both themes, shared chrome) plus this game's
+│   │                  own board/mark/invite-screen styles, restated on the
+│   │                  kit's tokens
 │   ├── pages/
 │   │   └── index.astro
 │   ├── layouts/
@@ -161,6 +189,21 @@ web/
 ├── vitest.config.ts
 └── eslint.config.mjs
 ```
+
+### `@sneat/game-kit` dependency
+
+The design system (tokens, both themes, the theme toggle, shared chrome
+components, and the cross-game promo footer) comes from
+`@sneat/game-kit` (`github:sneat-games/game-kit#v0.1.1`), pinned as a normal
+`dependencies` entry in `package.json`. The kit is public and MIT-licensed;
+this repo stays GPL-3.0 — consuming an MIT dependency from a GPL-3.0 project
+is fine (GPL projects may depend on more-permissively-licensed code). Only
+`@sneat/game-kit/theme.css` (CSS, zero JS cost) and a handful of named
+imports from the kit's main entry (`createThemeToggle`, `createGamesFooter`)
+are used; the rest of the kit (auction/, clock/, pvp/, its own CrazyGames SDK
+wrapper, its own board-agnostic UI components) is tree-shaken out of the
+build — this game keeps its own engine, bot, PvP transport and CrazyGames
+wrapper unchanged.
 
 ## Go rule-of-record
 
