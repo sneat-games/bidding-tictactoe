@@ -80,3 +80,64 @@ describe("vs-bot match loop ends in a terminal outcome", () => {
     expect([Outcome.XWins, Outcome.OWins, Outcome.Draw]).toContain(final);
   });
 });
+describe("buying a match-deciding turn", () => {
+  const { pickBid } = __test;
+
+  it("outbids by exactly one to block a loss when richer", () => {
+    // X threatens 0,1,2 — O must take cell 2 or lose the match.
+    const board = parseBoard("XX_______");
+    expect(pickBid(160, board, Mark.O, 40)).toBe(41);
+  });
+
+  it("outbids by exactly one to take the win when richer", () => {
+    // O threatens 0,1,2 and can finish it now.
+    const board = parseBoard("OO_______");
+    expect(pickBid(160, board, Mark.O, 40)).toBe(41);
+  });
+
+  it("cannot be outbid by anything the opponent can afford", () => {
+    const board = parseBoard("XX_______");
+    for (let opp = 0; opp <= 60; opp++) {
+      const bid = pickBid(opp + 5, board, Mark.O, opp);
+      expect(bid).toBeGreaterThan(opp);
+      expect(bid).toBeLessThanOrEqual(opp + 5);
+    }
+  });
+
+  it("falls back to a fraction when it cannot outbid outright", () => {
+    // Level balances: opponent+1 is unaffordable, so block proportionally.
+    const board = parseBoard("XX_______");
+    expect(pickBid(100, board, Mark.O, 100)).toBe(25);
+    // Poorer still.
+    expect(pickBid(40, board, Mark.O, 160)).toBe(10);
+  });
+
+  it("does not splurge on an ordinary midgame turn", () => {
+    // Nobody is one move from winning, so the outbid rule must not fire.
+    const board = parseBoard("X________");
+    const bid = pickBid(160, board, Mark.O, 40);
+    expect(bid).toBeLessThanOrEqual(Math.floor(160 / 6) + 1);
+  });
+
+  it("still bids nothing when broke", () => {
+    const board = parseBoard("XX_______");
+    expect(pickBid(0, board, Mark.O, 40)).toBe(0);
+  });
+
+  it("keeps the old shape when the opponent's budget is unknown", () => {
+    const board = parseBoard("XX_______");
+    expect(pickBid(160, board, Mark.O, Infinity)).toBe(40);
+  });
+});
+
+describe("botMove wiring", () => {
+  it("passes the opponent budget through to the bid", () => {
+    const move = botMove({
+      board: parseBoard("XX_______"),
+      budgetRemaining: 160,
+      me: Mark.O,
+      opponentBudget: 40,
+    });
+    expect(move).toEqual({ bid: 41, cell: 2 });
+  });
+});

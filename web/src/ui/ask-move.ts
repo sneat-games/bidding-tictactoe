@@ -22,6 +22,14 @@ import { botMove } from "../bot/bot";
 import type { BidPanel } from "./bid-panel";
 import { LATE_BID_DEFAULT, LATE_BID_MS, STALL_MS, stallBid } from "./turn-clock";
 
+/** Thrown when a turn is interrupted — currently only by "New game". */
+export class MoveAbortedError extends Error {
+  constructor() {
+    super("askMove: the turn was aborted");
+    this.name = "MoveAbortedError";
+  }
+}
+
 export interface AskMoveOptions {
   /** Container holding the rendered board — its cells are the commit control. */
   boardArea: HTMLElement;
@@ -39,6 +47,11 @@ export interface AskMoveOptions {
    * clock on an already-finished turn.
    */
   onOpponentBid?(fn: () => void): () => void;
+  /** Abandon the turn — rejects with MoveAbortedError and stops the clock. */
+  abort?: AbortSignal;
+  /** Answer window once the opponent's bid is in. Defaults to the PvP
+   *  LATE_BID_MS; vs-bot passes the longer VS_BOT_LATE_BID_MS. */
+  lateBidMs?: number;
 }
 
 /**
@@ -53,24 +66,36 @@ export function askMove(opts: AskMoveOptions): Promise<Move> {
   // Where an auto-submitted move plays. Computed from the board as it stands
   // at the start of the turn (no mark lands mid-turn), so an away player
   // still takes a sensible square rather than the first empty one.
-  const autoCell = botMove({ board, budgetRemaining: ownBalance, me }).cell;
+  const autoCell = botMove({ board, budgetRemaining: ownBalance, me, opponentBudget: opponentBalance }).cell;
 
-  return new Promise<Move>((resolve) => {
+  return new Promise<Move>((resolve, reject) => {
     let settled = false;
     let unsubscribe: (() => void) | undefined;
 
-    const finish = (move: Move) => {
+    const settle = (run: () => void) => {
       if (settled) return;
       settled = true;
       unsubscribe?.();
+      opts.abort?.removeEventListener("abort", onAbort);
       bidPanel.stopClock();
-      resolve(move);
+      run();
     };
+
+    const finish = (move: Move) => settle(() => resolve(move));
+    function onAbort() {
+      settle(() => reject(new MoveAbortedError()));
+    }
+
+    if (opts.abort?.aborted) {
+      onAbort();
+      return;
+    }
+    opts.abort?.addEventListener("abort", onAbort, { once: true });
 
     const runLateBidClock = () => {
       if (settled) return;
       bidPanel.runClock({
-        ms: LATE_BID_MS,
+        ms: opts.lateBidMs ?? LATE_BID_MS,
         label: "Opponent has bid — answer within",
         autoBid: LATE_BID_DEFAULT,
         onExpire: () => finish({ bid: LATE_BID_DEFAULT, cell: autoCell }),

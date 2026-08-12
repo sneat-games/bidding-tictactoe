@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { Mark, emptyBoard, parseBoard } from "../engine/btttplay";
-import { askMove } from "./ask-move";
+import { askMove, MoveAbortedError } from "./ask-move";
 import type { BidPanel } from "./bid-panel";
 import { createMatchScreen } from "./match-screen";
-import { LATE_BID_MS, STALL_MS, stallBid } from "./turn-clock";
+import { LATE_BID_MS, STALL_MS, VS_BOT_LATE_BID_MS, stallBid } from "./turn-clock";
 
 function setup(board = emptyBoard()) {
   const root = document.createElement("div");
@@ -224,6 +224,91 @@ describe("askMove — bids stay inside the balance", () => {
       ownBalance: 0, opponentBalance: 100, opponentBidIn: false,
     });
     vi.advanceTimersByTime(STALL_MS + 100);
+    await expect(p).resolves.toMatchObject({ bid: 0 });
+  });
+});
+
+describe("askMove — aborting a turn", () => {
+  it("rejects when the abort fires mid-turn", async () => {
+    vi.useFakeTimers();
+    const { boardArea, bidPanel, board } = setup();
+    const ac = new AbortController();
+    const p = askMove({
+      boardArea, bidPanel, board, me: Mark.X,
+      ownBalance: 100, opponentBalance: 100, opponentBidIn: true,
+      abort: ac.signal,
+    });
+    vi.advanceTimersByTime(2_000);
+    ac.abort();
+    await expect(p).rejects.toBeInstanceOf(MoveAbortedError);
+  });
+
+  it("rejects immediately when the signal is already aborted", async () => {
+    const { boardArea, bidPanel, board } = setup();
+    const ac = new AbortController();
+    ac.abort();
+    await expect(askMove({
+      boardArea, bidPanel, board, me: Mark.X,
+      ownBalance: 100, opponentBalance: 100, opponentBidIn: true,
+      abort: ac.signal,
+    })).rejects.toBeInstanceOf(MoveAbortedError);
+  });
+
+  it("stops the clock so an abandoned turn cannot still auto-bid", async () => {
+    vi.useFakeTimers();
+    const { boardArea, bidPanel, board } = setup();
+    const ac = new AbortController();
+    const p = askMove({
+      boardArea, bidPanel, board, me: Mark.X,
+      ownBalance: 100, opponentBalance: 100, opponentBidIn: true,
+      abort: ac.signal,
+    });
+    ac.abort();
+    await expect(p).rejects.toBeInstanceOf(MoveAbortedError);
+    expect(clockVisible(bidPanel)).toBe(false);
+    vi.advanceTimersByTime(60_000);
+  });
+
+  it("ignores an abort that lands after the move was made", async () => {
+    const { boardArea, bidPanel, board } = setup();
+    const ac = new AbortController();
+    const p = askMove({
+      boardArea, bidPanel, board, me: Mark.X,
+      ownBalance: 100, opponentBalance: 100, opponentBidIn: true,
+      abort: ac.signal,
+    });
+    clickCell(boardArea, 4);
+    ac.abort();
+    await expect(p).resolves.toEqual({ bid: 50, cell: 4 });
+  });
+});
+
+describe("askMove — the answer window is per mode", () => {
+  it("gives 20s against the bot", async () => {
+    vi.useFakeTimers();
+    const { boardArea, bidPanel, board } = setup();
+    let settled = false;
+    const p = askMove({
+      boardArea, bidPanel, board, me: Mark.X,
+      ownBalance: 100, opponentBalance: 100, opponentBidIn: true,
+      lateBidMs: VS_BOT_LATE_BID_MS,
+    }).then((m) => { settled = true; return m; });
+    // The PvP window passes without firing.
+    vi.advanceTimersByTime(LATE_BID_MS + 1_000);
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    vi.advanceTimersByTime(VS_BOT_LATE_BID_MS);
+    await expect(p).resolves.toMatchObject({ bid: 0 });
+  });
+
+  it("defaults to the tighter PvP window", async () => {
+    vi.useFakeTimers();
+    const { boardArea, bidPanel, board } = setup();
+    const p = askMove({
+      boardArea, bidPanel, board, me: Mark.X,
+      ownBalance: 100, opponentBalance: 100, opponentBidIn: true,
+    });
+    vi.advanceTimersByTime(LATE_BID_MS + 100);
     await expect(p).resolves.toMatchObject({ bid: 0 });
   });
 });

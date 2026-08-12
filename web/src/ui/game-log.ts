@@ -13,6 +13,7 @@
 
 import type { Move, TurnResult } from "../engine/btttplay";
 import { Mark, markString } from "../engine/btttplay";
+import { CELL_NAMES } from "./match-screen";
 
 export interface LogEntry {
   turn: number;
@@ -65,7 +66,8 @@ function renderEntry(entry: LogEntry): HTMLElement {
   const head = document.createElement("div");
   head.className = "game-log__entry-head";
   const tieBadge = result.tieBreak ? " <span class=\"game-log__tie\">tie</span>" : "";
-  head.innerHTML = `<span class="game-log__turn">T${turn + 1}</span> ${markString(result.winner)} took cell ${result.cell}${tieBadge}`;
+  const winner = markString(result.winner);
+  head.innerHTML = `<span class="game-log__turn">T${turn + 1}</span> <span class="mark mark--${winner.toLowerCase()}">${winner}</span> took ${CELL_NAMES[result.cell]}${tieBadge}`;
   card.append(head);
 
   // Both bars are sized against the player's OWN budget at the start of this
@@ -76,19 +78,25 @@ function renderEntry(entry: LogEntry): HTMLElement {
   return card;
 }
 
-/** A single bid bar. `won` controls the colour (green win / red loss). */
+/**
+ * A single bid bar, coloured by PLAYER (X green, O red) so a bar means the
+ * same thing here as the mark on the board and the balance bar above it.
+ * Winning the turn is shown by weight and a marker rather than by hue, which
+ * is now spoken for.
+ */
 function bidBar(player: string, bid: number, ownBudget: number, won: boolean): HTMLElement {
   const row = document.createElement("div");
-  row.className = `game-log__bid game-log__bid--${won ? "win" : "loss"}`;
+  row.className = `game-log__bid game-log__bid--${won ? "won" : "lost"}`;
 
   const lbl = document.createElement("span");
   lbl.className = "game-log__bid-label";
-  lbl.textContent = `${player} bid ${bid}`;
+  const marker = won ? ' <span class="game-log__bid-won-marker" title="won the turn">\u2713</span>' : "";
+  lbl.innerHTML = `<span class="mark mark--${player.toLowerCase()}">${player}</span> bid ${bid}${marker}`;
 
   const track = document.createElement("div");
   track.className = "bar-track";
   const fill = document.createElement("div");
-  fill.className = `bar-fill bar-fill--${won ? "win" : "loss"}`;
+  fill.className = `bar-fill bar-fill--${player.toLowerCase()}`;
   const pct = ownBudget > 0 ? Math.max(0, Math.min(1, bid / ownBudget)) : 0;
   fill.style.width = `${(pct * 100).toFixed(1)}%`;
   track.append(fill);

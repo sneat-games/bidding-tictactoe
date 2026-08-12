@@ -50,7 +50,11 @@ Before first deploy:
 - **vs Bot** — the bot strategy in `src/bot/bot.ts` plays the other side.
   The engine is the same TS port in `src/engine/btttplay.ts` that powers
   vs-friend. The bot commits its hidden bid at the start of the turn, so the
-  human always plays against the 10s answer clock.
+  human always plays against the 20s answer clock. When the turn decides the
+  match — either side can complete a line — and the bot is richer, it bids
+  `opponentBudget + 1`: the cheapest stake the opponent cannot outbid. A
+  persistent **New game** button restarts a match at any point; it arms on the
+  first click and only restarts on a second.
 - **vs Friend** — inviter generates a 6-char room code (`src/pvp/room.ts`),
   reserves it on the signaling worker, and shares
   `https://bidding-tictactoe.sneat.games/#room=<code>`. The invitee opens
@@ -87,8 +91,12 @@ A turn is bounded by two deadlines (`src/ui/turn-clock.ts`), both applied by
 
 | Situation | Deadline | Auto-submitted bid |
 |---|---|---|
-| The opponent's bid is in, yours is not | 10s | `0` — the only real bid wins and is transferred to you |
+| The opponent's bid is in, yours is not | 10s vs a friend, 20s vs the bot | `0` — the only real bid wins and is transferred to you |
 | Neither player has bid | 30s | `floor(own / 2)`, or `opponent + 1` when strictly richer |
+
+The bot gets the longer window because nobody is kept waiting by a slow human,
+and the bot's bid is in from the first instant of every turn — a 10s window
+would put the human on a permanent sprint.
 
 Both are **self-enforced**: a client only ever auto-submits its OWN move,
 through the same commit-reveal path a manual move takes, so a timeout can
@@ -100,11 +108,28 @@ the pending auto-bid is shown in the bid panel before it fires.
 The clock is a session-layer rule — `resolveTurn` already discards the loser's
 cell, so neither `server-go/btttplay` nor its TS port changes to support it.
 
+## Colours
+
+One colour per player, used everywhere that player appears — the mark on the
+board, their balance bar, their bid bar in the log, and their name in prose:
+**X is green, O is red**. Green and red carry no win/loss meaning in the log;
+the winning bid is marked by weight and a `✓` instead. Every coloured mark is
+also written out as its letter, so the scheme never carries information on its
+own.
+
 ## CrazyGames submission
 
-The `index.html` loads `https://sdk.crazygames.com/crazygames-sdk-v3.js`
-in the `<head>` (per the v3 docs). Astro's static output is the HTML5
-build CrazyGames accepts.
+The SDK script is **not** in the document head. `src/crazygames/sdk.ts`
+injects `https://sdk.crazygames.com/crazygames-sdk-v3.js` on demand and only
+on a CrazyGames surface (served from a CrazyGames domain, framed by one, or
+forced with `?cgsdk=1`), then awaits `init()` before any other SDK call per
+the v3 docs. Off CrazyGames the SDK only ever reports
+`environment: "disabled"`, so loading it is pure cost — a static tag in the
+head is render-blocking and delayed the menu on
+`bidding-tictactoe.sneat.games` by 7-10s. Astro's static output is still the
+HTML5 build CrazyGames accepts.
+
+To exercise the SDK path locally, open `http://localhost:4321/?cgsdk=1`.
 
 1. `npm run build`
 2. `zip -r bidding-tictactoe.zip dist/`

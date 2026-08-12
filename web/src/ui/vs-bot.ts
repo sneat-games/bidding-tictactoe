@@ -1,15 +1,21 @@
 // vs-bot screen. Renders the 2x2 match screen (balances + bid panel on top,
 // board + game log below) and plays the human against the TS bot strategy.
-// A rematch restarts in the same tab and clears the log.
 //
 // The bot's hidden bid is computed BEFORE the human is asked, which is what
-// makes its bid "in" for the turn clock: the human always answers the 10s
-// clock in this mode, and the 30s stall cap can never apply.
+// makes its bid "in" for the turn clock: the human always answers the clock
+// in this mode, and the 30s stall cap can never apply. The window here is the
+// longer VS_BOT_LATE_BID_MS — nobody is kept waiting by a slow human.
+//
+// A "New game" button sits under the board for the whole match, so a player
+// can start over without playing a lost position out to the end. It aborts
+// the turn in flight rather than waiting for the current move to land.
 
-import { Mark, Outcome, boardOutcome, newGame, resolveTurn, markString, outcomeString, Game, Move } from "../engine/btttplay";
+import { Mark, Outcome, boardOutcome, newGame, resolveTurn, markString, Game, Move } from "../engine/btttplay";
 import { botMove } from "../bot/bot";
-import { askMove } from "./ask-move";
-import { createMatchScreen, turnResultText, type MatchScreen } from "./match-screen";
+import { askMove, MoveAbortedError } from "./ask-move";
+import { createConfirmButton } from "./confirm-button";
+import { createMatchScreen, renderMatchOver, type MatchScreen } from "./match-screen";
+import { VS_BOT_LATE_BID_MS } from "./turn-clock";
 
 const BUDGET = 100;
 
@@ -23,20 +29,57 @@ export async function runVsBot(root: HTMLElement): Promise<void> {
     oLabel: `Bot (${markString(bot)})`,
   });
 
-  let game = newGame(BUDGET);
-  let turn = 0;
+  // Re-pointed at each match's controller, so the button outlives the match
+  // it restarts.
+  let restart = new AbortController();
+  const newGameBtn = createConfirmButton({
+    label: "New game",
+    confirmLabel: "Restart — click again",
+    onConfirm: () => restart.abort(),
+  });
+  screen.actions.append(newGameBtn.el);
 
   for (;;) {
-    const outcome = await playOneTurn(screen, game, human, bot, turn);
-    if (outcome === Outcome.Ongoing) {
-      turn++;
+    restart = new AbortController();
+    newGameBtn.disarm();
+    const done = await playMatch(screen, human, bot, restart.signal);
+
+    // Restarted mid-match: straight into a fresh one, no result screen.
+    if (done === null) {
+      screen.reset();
       continue;
     }
-    const again = await renderResult(screen, outcome, game, human);
+
+    // The match-over controls carry their own Rematch, so the persistent
+    // button would just be a second one saying the same thing.
+    screen.actions.hidden = true;
+    const again = await renderResult(screen, done.outcome, done.budgets, human);
     if (!again) return;
-    game = newGame(BUDGET);
-    turn = 0;
     screen.reset();
+  }
+}
+
+/** Play one match. Resolves with its result, or null if it was restarted. */
+async function playMatch(
+  screen: MatchScreen,
+  human: Mark,
+  bot: Mark,
+  abort: AbortSignal,
+): Promise<{ outcome: Outcome; budgets: [number, number] } | null> {
+  const game = newGame(BUDGET);
+  let turn = 0;
+  for (;;) {
+    let outcome: Outcome;
+    try {
+      outcome = await playOneTurn(screen, game, human, bot, turn, abort);
+    } catch (e) {
+      if (e instanceof MoveAbortedError) return null;
+      throw e;
+    }
+    if (outcome !== Outcome.Ongoing) {
+      return { outcome, budgets: [game.budget[0], game.budget[1]] };
+    }
+    turn++;
   }
 }
 
@@ -46,6 +89,7 @@ async function playOneTurn(
   human: Mark,
   bot: Mark,
   turn: number,
+  abort: AbortSignal,
 ): Promise<Outcome> {
   const humanIdx = human === Mark.X ? 0 : 1;
   const botIdx = humanIdx === 0 ? 1 : 0;
@@ -58,6 +102,7 @@ async function playOneTurn(
     board: game.board,
     budgetRemaining: game.budget[botIdx],
     me: bot,
+    opponentBudget: game.budget[humanIdx],
   });
 
   const humanChoice = await askMove({
@@ -68,6 +113,8 @@ async function playOneTurn(
     ownBalance: game.budget[humanIdx],
     opponentBalance: game.budget[botIdx],
     opponentBidIn: true,
+    lateBidMs: VS_BOT_LATE_BID_MS,
+    abort,
   });
 
   const xMove: Move = human === Mark.X ? humanChoice : botChoice;
@@ -78,8 +125,8 @@ async function playOneTurn(
     const { game: next, result } = resolveTurn(game, xMove, oMove);
     Object.assign(game, next);
     // Re-render with the post-move state so the winning mark is visible.
-    screen.renderBoard(game.board);
-    screen.setNote(turnResultText(result));
+    screen.renderBoard(game.board, result.cell);
+    screen.setTurnResult(result, human, "Bot");
     screen.appendTurn({
       turn,
       result,
@@ -95,19 +142,22 @@ async function playOneTurn(
   }
 }
 
-
 function renderResult(
   screen: MatchScreen,
   outcome: Outcome,
-  game: Game,
+  budgets: [number, number],
   human: Mark,
 ): Promise<boolean> {
   screen.bidPanel.setWaiting("Match over.");
 
-  const humanIdx = human === Mark.X ? 0 : 1;
-  const banner = document.createElement("p");
-  banner.className = "result-banner";
-  banner.textContent = `Game over: ${outcomeString(outcome)}. Balances — You: ${game.budget[humanIdx]}, Bot: ${game.budget[humanIdx === 0 ? 1 : 0]}.`;
+  const banner = renderMatchOver({
+    outcome,
+    you: human,
+    budgets,
+    youLabel: "You",
+    themLabel: "Bot",
+    initialBudget: BUDGET,
+  });
 
   const again = document.createElement("button");
   again.type = "button";

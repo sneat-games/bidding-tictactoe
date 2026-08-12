@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { stallBid, startCountdown, LATE_BID_MS, STALL_MS, LATE_BID_DEFAULT } from "./turn-clock";
+import { stallBid, startCountdown, LATE_BID_MS, STALL_MS, LATE_BID_DEFAULT, VS_BOT_LATE_BID_MS } from "./turn-clock";
 
 describe("stallBid", () => {
   it("stakes half the balance when both sides are level", () => {
@@ -113,5 +113,18 @@ describe("startCountdown", () => {
     c.stop();
     vi.advanceTimersByTime(5_000);
     expect(onExpire).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("mode-specific answer windows", () => {
+  it("gives more time against the bot than against a person", () => {
+    expect(VS_BOT_LATE_BID_MS).toBe(20_000);
+    expect(VS_BOT_LATE_BID_MS).toBeGreaterThan(LATE_BID_MS);
+  });
+
+  it("still resolves a bot turn before the stall cap could matter", () => {
+    // vs-bot never stalls (the bot always bids), but the ordering keeps the
+    // two windows meaningful if that ever changes.
+    expect(VS_BOT_LATE_BID_MS).toBeLessThan(STALL_MS);
   });
 });
