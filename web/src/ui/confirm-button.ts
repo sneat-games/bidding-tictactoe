@@ -23,7 +23,7 @@ export function createConfirmButton(opts: {
 }): ConfirmButton {
   const el = document.createElement("button");
   el.type = "button";
-  el.className = opts.className ?? "menu-btn";
+  el.className = opts.className ?? "btn btn--ghost menu-btn";
   el.textContent = opts.label;
   el.setAttribute("data-confirm-button", "");
 
