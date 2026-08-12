@@ -18,6 +18,7 @@ import { hostPeer, guestPeer, WireMessage, PeerHandle, commitFor, verifyReveal, 
 import { openTurnInbox } from "../pvp/turn-inbox";
 import { askMove } from "./ask-move";
 import { createMatchScreen, renderMatchOver, type MatchScreen } from "./match-screen";
+import { winningLine } from "./win-line";
 import * as cg from "../crazygames/sdk";
 
 const BUDGET = 100;
@@ -73,32 +74,67 @@ function renderInvite(
   args: { roomId: string; shareLink: string; cgShareLink: string | null },
 ) {
   root.innerHTML = "";
-  const banner = document.createElement("p");
-  banner.textContent = `Room ${args.roomId}. Waiting for your friend…`;
+  const card = document.createElement("section");
+  card.className = "card invite-card";
+  card.setAttribute("data-invite-card", "");
+
+  const title = document.createElement("h3");
+  title.className = "card__title";
+  title.textContent = "Invite a friend";
+
+  const status = document.createElement("p");
+  status.className = "invite-card__status";
+  status.textContent = "Waiting for your friend…";
+
+  const code = document.createElement("button");
+  code.type = "button";
+  code.className = "invite-code";
+  code.setAttribute("data-room-code", "");
+  code.title = "Click to copy the room code";
+  code.textContent = args.roomId;
+  code.addEventListener("click", () => {
+    void navigator.clipboard.writeText(args.roomId);
+    flashCopied(code, args.roomId);
+  });
+
   const link = document.createElement("p");
   link.className = "invite-link";
-  link.textContent = `Share link: ${args.shareLink}`;
+  link.textContent = args.shareLink;
+
   const copyBtn = document.createElement("button");
   copyBtn.type = "button";
+  copyBtn.className = "btn btn--primary";
   copyBtn.textContent = "Copy link";
   copyBtn.addEventListener("click", () => {
     void navigator.clipboard.writeText(args.shareLink);
-    copyBtn.textContent = "Copied";
-    setTimeout(() => (copyBtn.textContent = "Copy link"), 1500);
+    flashCopied(copyBtn, "Copy link");
   });
-  root.append(banner, link, copyBtn);
+
+  card.append(title, status, code, link, copyBtn);
   if (args.cgShareLink) {
     const cgLink = document.createElement("p");
+    cgLink.className = "invite-card__status";
     cgLink.textContent = `Or invite via CrazyGames: ${args.cgShareLink}`;
-    root.append(cgLink);
+    card.append(cgLink);
   }
+  root.append(card);
+}
+
+/** Flash "Copied" on a button/chip, then restore its resting label. */
+function flashCopied(el: HTMLElement, restLabel: string) {
+  el.textContent = "Copied";
+  setTimeout(() => (el.textContent = restLabel), 1500);
 }
 
 function renderJoined(root: HTMLElement, roomId: string) {
   root.innerHTML = "";
+  const card = document.createElement("section");
+  card.className = "card invite-card";
   const banner = document.createElement("p");
+  banner.className = "invite-card__status";
   banner.textContent = `Joined room ${roomId}. Connecting…`;
-  root.append(banner);
+  card.append(banner);
+  root.append(card);
 }
 
 async function playMatchLoop(root: HTMLElement, peer: PeerHandle): Promise<void> {
@@ -161,7 +197,7 @@ async function playOnePvpTurn(
   const myIdx = human === Mark.X ? 0 : 1;
   const oppIdx = myIdx === 0 ? 1 : 0;
 
-  screen.renderBoard(game.board);
+  screen.renderBoard(game.board, undefined, { mine: human });
 
   // Listen before waiting — see turn-inbox.ts.
   const inbox = openTurnInbox(peer, turn);
@@ -197,8 +233,11 @@ async function playOnePvpTurn(
 
     const { game: next, result } = resolveTurn(game, xMove, oMove);
     Object.assign(game, next);
-    // Re-render with the post-move state so the winning mark is visible.
-    screen.renderBoard(game.board, result.cell);
+    const outcome = boardOutcome(game.board);
+    // Re-render with the post-move state so the winning mark is visible; at
+    // match end, also highlight the winning line (a draw has none).
+    const winLine = outcome === Outcome.XWins || outcome === Outcome.OWins ? winningLine(game.board) : null;
+    screen.renderBoard(game.board, result.cell, { mine: human, winLine });
     screen.setTurnResult(result, human, "Friend");
     screen.appendTurn({
       turn,
@@ -287,12 +326,12 @@ function renderFinal(
   const again = document.createElement("button");
   again.type = "button";
   again.textContent = "Rematch (same friend)";
-  again.className = "rematch";
+  again.className = "btn btn--primary rematch";
 
   const leave = document.createElement("button");
   leave.type = "button";
   leave.textContent = "Leave";
-  leave.className = "menu-btn";
+  leave.className = "btn btn--ghost menu-btn";
 
   screen.controls.append(banner, again, leave);
   return new Promise((resolve) => {
@@ -312,13 +351,13 @@ function renderAbandoned(screen: MatchScreen, message: string): Promise<void> {
   screen.controls.innerHTML = "";
 
   const banner = document.createElement("p");
-  banner.className = "result-banner";
+  banner.className = "error";
   banner.textContent = message;
 
   const leave = document.createElement("button");
   leave.type = "button";
   leave.textContent = "Leave";
-  leave.className = "menu-btn";
+  leave.className = "btn btn--ghost menu-btn";
 
   screen.controls.append(banner, leave);
   return new Promise((resolve) => {

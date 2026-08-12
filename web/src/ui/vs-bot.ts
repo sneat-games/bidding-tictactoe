@@ -16,6 +16,7 @@ import { askMove, MoveAbortedError } from "./ask-move";
 import { createConfirmButton } from "./confirm-button";
 import { createMatchScreen, renderMatchOver, type MatchScreen } from "./match-screen";
 import { VS_BOT_LATE_BID_MS } from "./turn-clock";
+import { winningLine } from "./win-line";
 
 const BUDGET = 100;
 
@@ -94,7 +95,7 @@ async function playOneTurn(
   const humanIdx = human === Mark.X ? 0 : 1;
   const botIdx = humanIdx === 0 ? 1 : 0;
 
-  screen.renderBoard(game.board);
+  screen.renderBoard(game.board, undefined, { mine: human });
 
   // The bot commits first (hidden), so its bid is already in when the human
   // is asked — see the module comment.
@@ -124,8 +125,11 @@ async function playOneTurn(
   try {
     const { game: next, result } = resolveTurn(game, xMove, oMove);
     Object.assign(game, next);
-    // Re-render with the post-move state so the winning mark is visible.
-    screen.renderBoard(game.board, result.cell);
+    const outcome = boardOutcome(game.board);
+    // Re-render with the post-move state so the winning mark is visible; at
+    // match end, also highlight the winning line (a draw has none).
+    const winLine = outcome === Outcome.XWins || outcome === Outcome.OWins ? winningLine(game.board) : null;
+    screen.renderBoard(game.board, result.cell, { mine: human, winLine });
     screen.setTurnResult(result, human, "Bot");
     screen.appendTurn({
       turn,
@@ -135,7 +139,7 @@ async function playOneTurn(
       budgetsBefore,
       budgetsAfter: [game.budget[0], game.budget[1]],
     });
-    return boardOutcome(game.board);
+    return outcome;
   } catch (e) {
     screen.setNote(`Invalid move: ${e instanceof Error ? e.message : String(e)}`, "error");
     return Outcome.Ongoing;
@@ -162,12 +166,12 @@ function renderResult(
   const again = document.createElement("button");
   again.type = "button";
   again.textContent = "Rematch";
-  again.className = "rematch";
+  again.className = "btn btn--primary rematch";
 
   const leave = document.createElement("button");
   leave.type = "button";
   leave.textContent = "Back to menu";
-  leave.className = "menu-btn";
+  leave.className = "btn btn--ghost menu-btn";
 
   screen.controls.append(banner, again, leave);
   return new Promise((resolve) => {

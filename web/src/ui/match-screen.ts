@@ -34,8 +34,12 @@ export interface MatchScreen {
    *  is hidden while the end-of-match controls are up. */
   actions: HTMLElement;
   /** Draw the board, replacing the previous one and nothing else.
-   *  `lastCell` rings the mark placed on the most recent turn. */
-  renderBoard(board: Board, lastCell?: number): void;
+   *  `lastCell` rings the mark placed on the most recent turn.
+   *  `opts.mine` drives the hover ghost-mark preview (the LOCAL player's own
+   *  mark only — see global.css's ".board[data-my-mark]"). `opts.winLine`
+   *  glows the three winning cells and dims the rest at match end (see
+   *  src/ui/win-line.ts). */
+  renderBoard(board: Board, lastCell?: number, opts?: { mine?: Mark; winLine?: readonly number[] | null }): void;
   /** Set the line under the board. It survives until the next call. */
   setNote(text: string, kind?: "result" | "error"): void;
   /** Set the line under the board to a rendered turn result. */
@@ -108,7 +112,7 @@ export function createMatchScreen(opts: {
     boardArea,
     controls,
     actions,
-    renderBoard: (board, lastCell) => renderInto(boardSlot, board, lastCell),
+    renderBoard: (board, lastCell, opts) => renderInto(boardSlot, board, lastCell, opts),
     setNote,
     setTurnResult(result, you, themLabel) {
       note.hidden = false;
@@ -142,11 +146,18 @@ function wrap(className: string, child: HTMLElement): HTMLElement {
  * Draw the 3x3 board. Occupied cells are disabled, so `askMove` only ever
  * wires up the legal ones.
  */
-function renderInto(slot: HTMLElement, board: Board, lastCell?: number): void {
+function renderInto(
+  slot: HTMLElement,
+  board: Board,
+  lastCell?: number,
+  opts?: { mine?: Mark; winLine?: readonly number[] | null },
+): void {
   slot.innerHTML = "";
   const grid = document.createElement("div");
   grid.className = "board";
   grid.setAttribute("role", "grid");
+  if (opts?.mine) grid.dataset.myMark = markString(opts.mine);
+  const winLine = opts?.winLine;
   for (let i = 0; i < 9; i++) {
     const cell = document.createElement("button");
     cell.type = "button";
@@ -164,6 +175,9 @@ function renderInto(slot: HTMLElement, board: Board, lastCell?: number): void {
       cell.disabled = true;
       cell.setAttribute("aria-label", `${markString(mark)} on ${CELL_NAMES[i]}`);
       if (i === lastCell) cell.classList.add("board__cell--last");
+    }
+    if (winLine) {
+      cell.classList.add(winLine.includes(i) ? "board__cell--win" : "board__cell--dim");
     }
     grid.appendChild(cell);
   }
