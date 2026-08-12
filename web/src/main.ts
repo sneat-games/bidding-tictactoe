@@ -35,6 +35,8 @@ export async function bootstrap() {
   // match look like it is still loading.
   document.getElementById("status")?.remove();
 
+  wireHomeLink();
+
   const root = document.getElementById("game")!;
   root.innerHTML = "";
 
@@ -81,4 +83,30 @@ function applySettings(s: { disableChat?: boolean; muteAudio?: boolean }) {
   // No chat UI ships in the MVP; `disableChat` is honored by virtue of
   // having no chat surface. The listener is wired so a future chat
   // implementation lifts correctly.
+}
+
+/**
+ * The title doubles as "back to the main menu".
+ *
+ * It is a real anchor so middle-click and open-in-new-tab behave, but a plain
+ * same-page navigation would only drop the `#room=` fragment without
+ * reloading — leaving a match, its timers and any live peer connection
+ * running behind the menu. Reloading is the one reset that is guaranteed to
+ * be complete, and the app boots in well under a tenth of a second now that
+ * nothing blocks on a third-party script.
+ */
+function wireHomeLink() {
+  const link = document.getElementById("home-link");
+  if (!link) return;
+  link.addEventListener("click", (e) => {
+    // Leave modified clicks to the browser (new tab, new window, download).
+    const me = e as MouseEvent;
+    if (me.metaKey || me.ctrlKey || me.shiftKey || me.altKey || me.button !== 0) return;
+    e.preventDefault();
+    if (window.location.hash) {
+      // Drop `#room=...` so a reload lands on the menu, not back in the room.
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
+    window.location.reload();
+  });
 }

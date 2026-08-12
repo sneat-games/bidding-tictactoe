@@ -1,11 +1,15 @@
 // CrazyGames SDK v3 wrapper.
 //
-// The HTML5 SDK script tag is loaded in `src/layouts/Layout.astro`. This
-// wrapper initialises the SDK, gates every call by environment so the app
-// degrades gracefully on non-CrazyGames domains (e.g. bidding-tictactoe.
-// sneat.games, localhost with no SDK), wires game/user/data/settings helpers,
-// and exposes the Play-with-Friends surface (room lifecycle, invite link,
-// join listener, instant-multiplayer).
+// This wrapper decides WHETHER to load the SDK, loads it, initialises it, and
+// gates every call by environment so the app degrades gracefully off
+// CrazyGames, wiring the Play-with-Friends surface (room lifecycle, invite
+// link, join listener, instant-multiplayer).
+//
+// The SDK script is injected on demand rather than sitting in the document
+// head. A static tag there is render-blocking and third-party: on
+// bidding-tictactoe.sneat.games it cost 7-10s before the menu appeared, only
+// to have the SDK report `environment: "disabled"` and do nothing. Off
+// CrazyGames the SDK has no job, so it is never fetched — see `shouldLoadSdk`.
 //
 // Reference: https://docs.crazygames.com/sdk/ (v3).
 
@@ -98,20 +102,118 @@ let initialised: boolean = false;
 /** Init promise so multiple callers can race safely. */
 let initPromise: Promise<void> | null = null;
 
-/** Initialise the SDK. Safe to await multiple times. Resolves silently when
- *  the SDK is absent (non-CrazyGames domains, e.g. sneat.games). */
+const SDK_SRC = "https://sdk.crazygames.com/crazygames-sdk-v3.js";
+
+/** Never let a wedged third-party script hold the game on its loading screen. */
+const SDK_BOOT_TIMEOUT_MS = 8_000;
+
+/** crazygames.com and its regional/staging siblings. */
+const CG_HOST = /(^|\.)crazygames\.(com|co\.uk|dev)$/i;
+
+/** The signals `shouldLoadSdk` reads, passed in so it stays testable. */
+export interface SdkHostContext {
+  hostname: string;
+  /** `location.search`, for the `?cgsdk=1` override. */
+  search: string;
+  /** Whether this document is inside a frame at all. */
+  framed: boolean;
+  /** `location.ancestorOrigins`, where the browser exposes it. */
+  ancestorOrigins?: readonly string[];
+  referrer: string;
+}
+
+function isCrazyGamesUrl(value: string): boolean {
+  try {
+    return CG_HOST.test(new URL(value).hostname);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether the CrazyGames SDK is worth loading here.
+ *
+ * The SDK only does anything inside CrazyGames. Everywhere else — a direct
+ * visit to bidding-tictactoe.sneat.games, a local dev server, a `file://`
+ * open of `dist/` — it initialises to `environment: "disabled"` after a
+ * costly third-party round trip. So: load it when we are served from a
+ * CrazyGames domain, when we are framed by one, or when explicitly forced
+ * with `?cgsdk=1` for testing the SDK path off-platform.
+ *
+ * When we are framed but cannot see by whom (no `ancestorOrigins`, referrer
+ * suppressed), this fails OPEN: missing the SDK on CrazyGames breaks rooms
+ * and monetisation, while loading it inside some other frame merely wastes a
+ * request.
+ */
+export function shouldLoadSdk(ctx: SdkHostContext): boolean {
+  if (new URLSearchParams(ctx.search).get("cgsdk") === "1") return true;
+  if (CG_HOST.test(ctx.hostname)) return true;
+  // A top-level page that is not on a CrazyGames domain is never a
+  // CrazyGames game surface.
+  if (!ctx.framed) return false;
+  const ancestors = ctx.ancestorOrigins;
+  if (ancestors && ancestors.length > 0) {
+    for (const origin of ancestors) {
+      if (isCrazyGamesUrl(origin)) return true;
+    }
+    return false; // Framed, and we can see it is not CrazyGames.
+  }
+  if (!ctx.referrer) return true; // Framed, referrer hidden — fail open.
+  return isCrazyGamesUrl(ctx.referrer);
+}
+
+function currentContext(): SdkHostContext {
+  const loc = window.location;
+  const ancestors = loc.ancestorOrigins;
+  return {
+    hostname: loc.hostname,
+    search: loc.search,
+    framed: window.self !== window.top,
+    ancestorOrigins: ancestors ? Array.from(ancestors) : undefined,
+    referrer: document.referrer,
+  };
+}
+
+/** Inject the SDK script and resolve once it has run. */
+function loadSdkScript(): Promise<void> {
+  if (sdk()) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const el = document.createElement("script");
+    el.src = SDK_SRC;
+    el.async = true;
+    el.addEventListener("load", () => resolve(), { once: true });
+    el.addEventListener("error", () => reject(new Error("crazygames: SDK script failed to load")), { once: true });
+    document.head.append(el);
+  });
+}
+
+function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`crazygames: ${what} timed out`)), ms);
+  });
+  return Promise.race([p, timeout]).finally(() => clearTimeout(timer)) as Promise<T>;
+}
+
+/**
+ * Load and initialise the SDK, if this page is a CrazyGames surface. Safe to
+ * await multiple times; resolves quickly and silently everywhere else, so the
+ * menu is never waiting on a third party.
+ */
 export async function initSdk(): Promise<void> {
   if (initialised) return;
   if (initPromise) return initPromise;
   initPromise = (async () => {
-    const s = sdk();
-    if (!s) return; // No script tag present (e.g. sneat.games build run without it).
+    if (!shouldLoadSdk(currentContext())) return;
     try {
-      await s.init();
+      await withTimeout(loadSdkScript(), SDK_BOOT_TIMEOUT_MS, "SDK script load");
+      const s = sdk();
+      if (!s) return;
+      await withTimeout(s.init(), SDK_BOOT_TIMEOUT_MS, "SDK init");
       initialised = true;
     } catch (e) {
-      // Swallow; environments without an init function still degrade.
-      console.warn("[crazygames] SDK init failed; running in degraded mode.", e);
+      // Degrade: every call is gated on `isSdkAvailable`, so the game plays on.
+      console.warn("[crazygames] SDK unavailable; running in degraded mode.", e);
     }
   })();
   return initPromise;

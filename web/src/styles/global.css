@@ -14,11 +14,18 @@
   --muted: #94a3b8;
   --card-bg: #1e293b;
   --card-border: #334155;
+  /* One colour per player, used everywhere that player appears: the mark on
+     the board, their balance bar, their bid bar in the log, and their name in
+     prose. Green/red carry no win/loss meaning here — they identify X and O.
+     Every place a colour is used, the mark itself is also written out, so the
+     scheme never carries information on its own. */
+  --x-colour: #22c55e;
+  --o-colour: #ef4444;
+  /* Outcome colours, for the end-of-match banner only. */
   --win: #22c55e;
   --loss: #ef4444;
-  --x-colour: #6366f1;
-  --o-colour: #f59e0b;
   --urgent: #f87171;
+  --accent-hover: #a5b4fc;
 }
 
 html.muted audio, html.muted video { display: none !important; }
@@ -43,6 +50,21 @@ main#app {
   flex-direction: column;
   gap: var(--gap);
 }
+
+/* --- site header ------------------------------------------------------ */
+
+.site-header { display: flex; flex-direction: column; gap: 0.15rem; }
+.site-title { margin: 0; font-size: 2rem; line-height: 1.15; }
+.site-title a {
+  color: inherit;
+  text-decoration: none;
+  border-radius: 6px;
+}
+.site-title a:hover { color: var(--accent-hover); }
+.site-title a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.site-byline { margin: 0; font-size: 0.85rem; color: var(--muted); }
+.site-byline a { color: var(--muted); }
+.site-byline a:hover { color: var(--fg); }
 
 /* --- match screen: 2x2 grid ------------------------------------------- */
 /*
@@ -100,7 +122,7 @@ main#app {
 .bar-fill--x { background: var(--x-colour); }
 .bar-fill--o { background: var(--o-colour); }
 .bar-fill--win { background: var(--win); }
-.bar-fill--loss { background: var(--loss); opacity: 0.7; }
+.bar-fill--loss { background: var(--loss); }
 
 /* --- balances card ---------------------------------------------------- */
 
@@ -164,6 +186,13 @@ main#app {
 }
 
 .board__cell:not(:disabled):hover { background: #334155; }
+.board__cell[data-mark="X"] { color: var(--x-colour); }
+.board__cell[data-mark="O"] { color: var(--o-colour); }
+/* The mark placed on the most recent turn. */
+.board__cell--last {
+  border-color: currentColor;
+  box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 35%, transparent);
+}
 .board__cell.selected {
   background: var(--accent);
   color: var(--accent-contrant);
@@ -171,9 +200,90 @@ main#app {
 }
 .board__cell:disabled { cursor: default; opacity: 0.7; }
 
-.turn-result, .result-banner, .error { padding: 0.5rem 0; }
-.result-banner { font-size: 1.25rem; font-weight: 700; }
+.turn-result {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  padding: 0.5rem 0;
+  margin: 0;
+}
+.turn-result__text { color: var(--muted); }
+.turn-result__text strong { color: var(--fg); font-weight: 700; }
+
+/* A colour-coded X or O, wherever one is named in prose. */
+.mark { font-weight: 800; }
+.mark--x { color: var(--x-colour); }
+.mark--o { color: var(--o-colour); }
+
+.badge {
+  font-size: 0.7rem;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #475569;
+  color: var(--fg);
+}
+
+.error { padding: 0.5rem 0; }
 .error { color: #fca5a5; }
+
+/* --- end-of-match banner ---------------------------------------------- */
+
+.match-over {
+  margin: 1rem 0;
+  padding: 1rem 1.15rem;
+  border-radius: 10px;
+  border: 1px solid var(--card-border);
+  border-left: 4px solid var(--muted);
+  background: var(--card-bg);
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+.match-over--win  { border-left-color: var(--win); }
+.match-over--loss { border-left-color: var(--loss); }
+.match-over--draw { border-left-color: var(--o-colour); }
+
+.match-over__headline {
+  margin: 0;
+  font-size: 1.4rem;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+.match-over--win  .match-over__headline { color: var(--win); }
+.match-over--loss .match-over__headline { color: var(--loss); }
+.match-over--draw .match-over__headline { color: var(--o-colour); }
+
+.match-over__balances {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--card-border);
+}
+.match-over__balance {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: baseline;
+  gap: 0.6rem;
+}
+.match-over__balance-label { color: var(--muted); font-size: 0.9rem; }
+.match-over__balance-value {
+  font-size: 1.1rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.match-over__balance-delta {
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  min-width: 3.5em;
+  text-align: right;
+}
+.match-over__balance-delta--up { color: var(--win); }
+.match-over__balance-delta--down { color: var(--loss); }
+
+.match__controls .rematch, .match__controls .menu-btn { margin-top: 0.25rem; }
 
 /* --- bid input -------------------------------------------------------- */
 
@@ -233,4 +343,19 @@ button:disabled { opacity: 0.4; cursor: default; }
   margin-left: 0.25rem;
 }
 .game-log__bid { display: flex; align-items: center; gap: 0.4rem; margin: 0.2rem 0; }
-.game-log__bid-label { min-width: 5rem; font-size: 0.75rem; color: var(--muted); }
+.game-log__bid-label { min-width: 5.5rem; font-size: 0.75rem; color: var(--muted); }
+/* The bars are coloured by PLAYER, so who won the turn is carried by weight
+   rather than by hue. */
+.game-log__bid--lost { opacity: 0.45; }
+.game-log__bid--won .game-log__bid-label { color: var(--fg); font-weight: 600; }
+.game-log__bid-won-marker { color: var(--muted); font-size: 0.7rem; }
+
+/* --- in-match actions ------------------------------------------------- */
+
+.match__actions { margin-top: 0.75rem; }
+.match__actions[hidden] { display: none; }
+/* The armed state of "New game" — one more click and the match is gone. */
+.match__actions .is-armed {
+  background: var(--loss);
+  color: #fff;
+}

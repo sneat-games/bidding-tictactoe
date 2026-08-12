@@ -4,9 +4,14 @@
 // rule (winner pays their bid to the loser; total budget is conserved),
 // bidding the whole budget to win a single cell would gift that budget to
 // the opponent — so the bid sizing is deliberately restrained:
-//   - Bid: ~1/3 of remaining budget when bot has a winning cell, ~1/4 when
-//     blocking the opponent's win, and a small jittered slice otherwise.
-//     Zero budget -> bid 0 (rely on tie-break).
+//   - Bid: when the turn DECIDES the match — the bot can complete a line, or
+//     the opponent can — and the bot is richer, it bids `opponentBudget + 1`:
+//     the cheapest stake the opponent cannot possibly outbid. Paying it
+//     hands that budget to the opponent under the transfer rule, which is
+//     irrelevant against a win, and cheap against a loss. Otherwise ~1/3 of
+//     remaining for its own winning cell, ~1/4 to block, and a small
+//     jittered slice in the midgame. Zero budget -> bid 0 (rely on
+//     tie-break).
 //   - Cell: if there is a winning cell for the bot, take it. Else if there
 //     is a winning cell for the opponent, block it. Else take the centre,
 //     then a corner, then any open cell.
@@ -45,11 +50,19 @@ function pickCell(board: Board, me: Mark): number {
   return empties[Math.floor(Math.random() * empties.length)];
 }
 
-function pickBid(budgetRemaining: number, board: Board, me: Mark): number {
+function pickBid(budgetRemaining: number, board: Board, me: Mark, opponentBudget: number): number {
   if (budgetRemaining <= 0) return 0;
   const opponent: Mark = me === Mark.X ? Mark.O : Mark.X;
   const myWin = findWinningCell(board, me);
   const oppWin = findWinningCell(board, opponent);
+
+  // This turn settles the match either way: take it or block it. A strictly
+  // richer player can always afford `opponentBudget + 1` (own > opp over
+  // integers means own >= opp + 1), and no bid the opponent can make beats
+  // it — so the decisive turn is bought outright rather than gambled on.
+  if ((myWin !== undefined || oppWin !== undefined) && budgetRemaining > opponentBudget) {
+    return opponentBudget + 1;
+  }
 
   // Under the first-price-TRANSFER rule, the winning bid is paid to the
   // loser. Bidding the whole budget to win a single cell gifts it to the
@@ -74,9 +87,12 @@ export function botMove(state: {
   board: Board;
   budgetRemaining: number;
   me: Mark;
+  /** The opponent's budget. Public information, and what decides whether a
+   *  match-deciding turn can be bought outright. */
+  opponentBudget?: number;
 }): Move {
   const cell = pickCell(state.board, state.me);
-  const bid = pickBid(state.budgetRemaining, state.board, state.me);
+  const bid = pickBid(state.budgetRemaining, state.board, state.me, state.opponentBudget ?? Infinity);
   return { bid, cell };
 }
 

@@ -19,8 +19,15 @@
 // lands. Both are session-layer rules: `resolveTurn` already discards the
 // loser's cell, so neither server-go/btttplay nor its TS port changes.
 
-/** How long the second player gets to answer once one bid is in. */
+/** How long the second player gets to answer once one bid is in, against a
+ *  human. A real person is sitting there waiting, so it is deliberately
+ *  tight. */
 export const LATE_BID_MS = 10_000;
+
+/** The same window against the bot. Nobody is kept waiting, and the bot's bid
+ *  is in from the first instant of every turn, so the human would otherwise
+ *  play the whole match on a 10s clock. */
+export const VS_BOT_LATE_BID_MS = 20_000;
 
 /** How long a turn may sit with no bid from either player. */
 export const STALL_MS = 30_000;

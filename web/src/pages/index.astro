@@ -3,7 +3,15 @@ import Layout from "../layouts/Layout.astro";
 ---
 <Layout title="Bidding Tic-Tac-Toe">
   <main id="app">
-    <h1>Bidding Tic-Tac-Toe</h1>
+    <header class="site-header">
+      <h1 class="site-title">
+        <!-- Doubles as the way back to the mode-select menu; main.ts wires the
+             click so it resets a match in progress instead of only dropping
+             the #room fragment. -->
+        <a id="home-link" href="./" title="Back to the main menu">Bidding Tic-Tac-Toe</a>
+      </h1>
+      <p class="site-byline">by <a href="https://sneat.games/">Sneat.Games</a></p>
+    </header>
     <p id="status">Loading…</p>
     <div id="game" aria-live="polite"></div>
   </main>

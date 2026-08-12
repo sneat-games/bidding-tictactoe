@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { Mark, Outcome, parseBoard } from "../engine/btttplay";
-import { createMatchScreen, turnResultText } from "./match-screen";
+import { createMatchScreen, matchOutcomeKind, renderMatchOver } from "./match-screen";
 
 function screen() {
   const root = document.createElement("div");
@@ -130,18 +130,6 @@ describe("the note under the board", () => {
   });
 });
 
-describe("turnResultText", () => {
-  it("names the winner, the cell and what they paid", () => {
-    expect(turnResultText({ winner: Mark.X, cell: 4, bid: 30, tieBreak: false, outcome: Outcome.Ongoing }))
-      .toBe("X won the turn, took cell 4, paid 30.");
-  });
-
-  it("flags a tie-break", () => {
-    expect(turnResultText({ winner: Mark.O, cell: 0, bid: 12, tieBreak: true, outcome: Outcome.Ongoing }))
-      .toBe("O won the turn, took cell 0, paid 12 (tie-break).");
-  });
-});
-
 describe("end-of-match controls", () => {
   it("keep to their own slot and clear on a rematch", () => {
     const s = screen();
@@ -163,7 +151,7 @@ describe("board rendering", () => {
     expect(cells[1].disabled).toBe(true);
     expect(cells[2].disabled).toBe(false);
     expect(cells[0].textContent).toBe("X");
-    expect(cells[2].textContent).toBe("_");
+    expect(cells[2].textContent).toBe("");
   });
 
   it("replaces the previous board instead of stacking a second one", () => {
@@ -202,5 +190,202 @@ describe("layout stylesheet contract", () => {
   it("gives the board no horizontal auto-margin that would break the alignment", () => {
     const board = css.match(/\n\.board \{[^}]*\}/)![0];
     expect(board).not.toMatch(/margin:/);
+  });
+});
+
+describe("end-of-match banner", () => {
+  const opts = {
+    you: Mark.X,
+    budgets: [96, 104] as [number, number],
+    youLabel: "You",
+    themLabel: "Bot",
+    initialBudget: 100,
+  };
+
+  it("names the result in the player's own terms, not the engine's", () => {
+    // The engine calls this "OWins"; a player should never see that.
+    const el = renderMatchOver({ ...opts, outcome: Outcome.OWins });
+    const headline = el.querySelector("[data-headline]")!.textContent!;
+    expect(headline).toBe("😔 Bot wins");
+    expect(headline).not.toContain("OWins");
+  });
+
+  it("celebrates a win", () => {
+    const el = renderMatchOver({ ...opts, outcome: Outcome.XWins });
+    expect(el.querySelector("[data-headline]")!.textContent).toBe("🏆 You win!");
+    expect(el.getAttribute("data-match-over")).toBe("win");
+  });
+
+  it("marks a draw", () => {
+    const el = renderMatchOver({ ...opts, outcome: Outcome.Draw });
+    expect(el.querySelector("[data-headline]")!.textContent).toBe("🤝 Draw");
+    expect(el.getAttribute("data-match-over")).toBe("draw");
+  });
+
+  it("reads the outcome from the local player's side", () => {
+    // Same board result, opposite seats.
+    expect(matchOutcomeKind(Outcome.OWins, Mark.O)).toBe("win");
+    expect(matchOutcomeKind(Outcome.OWins, Mark.X)).toBe("loss");
+    expect(matchOutcomeKind(Outcome.XWins, Mark.X)).toBe("win");
+    expect(matchOutcomeKind(Outcome.XWins, Mark.O)).toBe("loss");
+    expect(matchOutcomeKind(Outcome.Draw, Mark.X)).toBe("draw");
+  });
+
+  it("shows each side's final balance under its own label", () => {
+    const el = renderMatchOver({ ...opts, outcome: Outcome.OWins });
+    const rows = [...el.querySelectorAll("[data-final-balance]")].map((r) => [
+      r.querySelector(".match-over__balance-label")!.textContent,
+      r.querySelector(".match-over__balance-value")!.textContent,
+    ]);
+    expect(rows).toEqual([["You", "96"], ["Bot", "104"]]);
+  });
+
+  it("puts the local player first regardless of seat", () => {
+    const el = renderMatchOver({
+      ...opts, you: Mark.O, budgets: [96, 104], themLabel: "Friend", outcome: Outcome.OWins,
+    });
+    const rows = [...el.querySelectorAll("[data-final-balance]")].map((r) => [
+      r.querySelector(".match-over__balance-label")!.textContent,
+      r.querySelector(".match-over__balance-value")!.textContent,
+    ]);
+    // As O, the local player's balance is budgets[1].
+    expect(rows).toEqual([["You", "104"], ["Friend", "96"]]);
+  });
+
+  it("shows the movement from the starting budget with a real minus sign", () => {
+    const el = renderMatchOver({ ...opts, outcome: Outcome.OWins });
+    const deltas = [...el.querySelectorAll(".match-over__balance-delta")].map((d) => d.textContent);
+    expect(deltas).toEqual(["−4", "+4"]);
+  });
+
+  it("omits the movement when a balance is unchanged", () => {
+    const el = renderMatchOver({ ...opts, budgets: [100, 100], outcome: Outcome.Draw });
+    expect(el.querySelectorAll(".match-over__balance-delta")).toHaveLength(0);
+  });
+
+  it("is announced to assistive tech", () => {
+    const el = renderMatchOver({ ...opts, outcome: Outcome.XWins });
+    expect(el.getAttribute("role")).toBe("status");
+  });
+});
+
+describe("turn result line", () => {
+  const s = () => screen();
+  const win = { winner: Mark.X, cell: 4, bid: 26, tieBreak: false, outcome: Outcome.Ongoing };
+
+  it("names the winner with a colour-coded mark chip", () => {
+    const m = s();
+    m.setTurnResult(win, Mark.X, "Bot");
+    const chip = m.boardArea.querySelector("[data-note] .mark")!;
+    expect(chip.textContent).toBe("X");
+    expect(chip.classList.contains("mark--x")).toBe(true);
+  });
+
+  it("speaks from the local player's side", () => {
+    const mine = s();
+    mine.setTurnResult(win, Mark.X, "Bot");
+    expect(mine.boardArea.querySelector("[data-note]")!.textContent).toContain("You took");
+
+    const theirs = s();
+    theirs.setTurnResult(win, Mark.O, "Bot");
+    expect(theirs.boardArea.querySelector("[data-note]")!.textContent).toContain("Bot took");
+  });
+
+  it("names the square instead of printing an index", () => {
+    const m = s();
+    m.setTurnResult(win, Mark.X, "Bot");
+    const text = m.boardArea.querySelector("[data-note]")!.textContent!;
+    expect(text).toContain("the centre");
+    expect(text).not.toContain("cell 4");
+  });
+
+  it("emphasises the square and the price", () => {
+    const m = s();
+    m.setTurnResult(win, Mark.X, "Bot");
+    const strongs = [...m.boardArea.querySelectorAll("[data-note] strong")].map((e) => e.textContent);
+    expect(strongs).toEqual(["the centre", "26"]);
+  });
+
+  it("badges a tie-break, and only then", () => {
+    const plain = s();
+    plain.setTurnResult(win, Mark.X, "Bot");
+    expect(plain.boardArea.querySelector("[data-note] .badge--tie")).toBeNull();
+
+    const tied = s();
+    tied.setTurnResult({ ...win, tieBreak: true }, Mark.X, "Bot");
+    expect(tied.boardArea.querySelector("[data-note] .badge--tie")!.textContent).toBe("tie-break");
+  });
+
+  it("replaces the previous turn's line rather than appending to it", () => {
+    const m = s();
+    m.setTurnResult(win, Mark.X, "Bot");
+    m.setTurnResult({ ...win, winner: Mark.O, cell: 0, bid: 9 }, Mark.X, "Bot");
+    expect(m.boardArea.querySelectorAll("[data-note] .mark")).toHaveLength(1);
+    const text = m.boardArea.querySelector("[data-note]")!.textContent!;
+    expect(text).toContain("Bot took");
+    expect(text).toContain("top left");
+  });
+});
+
+describe("board marks", () => {
+  it("colour-codes X and O and leaves empties blank", () => {
+    const m = screen();
+    m.renderBoard(parseBoard("XO_______"));
+    const cells = [...m.boardArea.querySelectorAll<HTMLButtonElement>(".board__cell")];
+    expect(cells[0].dataset.mark).toBe("X");
+    expect(cells[1].dataset.mark).toBe("O");
+    // "_" is a debugging glyph, not a game piece.
+    expect(cells[2].textContent).toBe("");
+    expect(cells[2].dataset.mark).toBeUndefined();
+  });
+
+  it("rings the most recent move, and only it", () => {
+    const m = screen();
+    m.renderBoard(parseBoard("XO_______"), 1);
+    const ringed = [...m.boardArea.querySelectorAll(".board__cell--last")];
+    expect(ringed).toHaveLength(1);
+    expect((ringed[0] as HTMLElement).dataset.cell).toBe("1");
+  });
+
+  it("rings nothing when no last move is given", () => {
+    const m = screen();
+    m.renderBoard(parseBoard("XO_______"));
+    expect(m.boardArea.querySelectorAll(".board__cell--last")).toHaveLength(0);
+  });
+
+  it("labels every square for screen readers", () => {
+    const m = screen();
+    m.renderBoard(parseBoard("X________"));
+    const cells = [...m.boardArea.querySelectorAll<HTMLButtonElement>(".board__cell")];
+    expect(cells[0].getAttribute("aria-label")).toBe("X on top left");
+    expect(cells[4].getAttribute("aria-label")).toBe("Play the centre");
+  });
+});
+
+describe("player colours", () => {
+  const css = readFileSync(resolve(process.cwd(), "src/styles/global.css"), "utf8");
+
+  it("gives each player one colour, green for X and red for O", () => {
+    expect(css).toMatch(/--x-colour:\s*#22c55e/);
+    expect(css).toMatch(/--o-colour:\s*#ef4444/);
+  });
+
+  it("uses that same colour on the board, the balance bar and in prose", () => {
+    expect(css).toMatch(/\.board__cell\[data-mark="X"\]\s*\{\s*color:\s*var\(--x-colour\)/);
+    expect(css).toMatch(/\.board__cell\[data-mark="O"\]\s*\{\s*color:\s*var\(--o-colour\)/);
+    expect(css).toMatch(/\.bar-fill--x\s*\{\s*background:\s*var\(--x-colour\)/);
+    expect(css).toMatch(/\.bar-fill--o\s*\{\s*background:\s*var\(--o-colour\)/);
+    expect(css).toMatch(/\.mark--x\s*\{\s*color:\s*var\(--x-colour\)/);
+    expect(css).toMatch(/\.mark--o\s*\{\s*color:\s*var\(--o-colour\)/);
+  });
+
+  it("never leaves colour carrying meaning on its own", () => {
+    // Every coloured mark is also written out as the letter, so red/green
+    // vision deficiency loses nothing.
+    const s = screen();
+    s.renderBoard(parseBoard("XO_______"));
+    const cells = [...s.boardArea.querySelectorAll<HTMLButtonElement>(".board__cell")];
+    expect(cells[0].textContent).toBe("X");
+    expect(cells[1].textContent).toBe("O");
   });
 });

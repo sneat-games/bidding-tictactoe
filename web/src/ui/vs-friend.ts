@@ -12,12 +12,12 @@
 // disagreeing. When a peer stops answering altogether, the match is
 // abandoned with a notice rather than resolved by guesswork.
 
-import { Mark, Outcome, newGame, resolveTurn, boardOutcome, outcomeString, Game, Move } from "../engine/btttplay";
+import { Mark, Outcome, newGame, resolveTurn, boardOutcome, Game, Move } from "../engine/btttplay";
 import { reserveRoomId } from "../pvp/room";
 import { hostPeer, guestPeer, WireMessage, PeerHandle, commitFor, verifyReveal, newSalt } from "../pvp/peer";
 import { openTurnInbox } from "../pvp/turn-inbox";
 import { askMove } from "./ask-move";
-import { createMatchScreen, turnResultText, type MatchScreen } from "./match-screen";
+import { createMatchScreen, renderMatchOver, type MatchScreen } from "./match-screen";
 import * as cg from "../crazygames/sdk";
 
 const BUDGET = 100;
@@ -198,8 +198,8 @@ async function playOnePvpTurn(
     const { game: next, result } = resolveTurn(game, xMove, oMove);
     Object.assign(game, next);
     // Re-render with the post-move state so the winning mark is visible.
-    screen.renderBoard(game.board);
-    screen.setNote(turnResultText(result));
+    screen.renderBoard(game.board, result.cell);
+    screen.setTurnResult(result, human, "Friend");
     screen.appendTurn({
       turn,
       result,
@@ -275,10 +275,14 @@ function renderFinal(
 ): Promise<boolean> {
   screen.bidPanel.setWaiting("Match over.");
 
-  const myIdx = human === Mark.X ? 0 : 1;
-  const banner = document.createElement("p");
-  banner.className = "result-banner";
-  banner.textContent = `Game over: ${outcomeString(outcome)}. Balances — You: ${game.budget[myIdx]}, Friend: ${game.budget[myIdx === 0 ? 1 : 0]}.`;
+  const banner = renderMatchOver({
+    outcome,
+    you: human,
+    budgets: game.budget,
+    youLabel: "You",
+    themLabel: "Friend",
+    initialBudget: BUDGET,
+  });
 
   const again = document.createElement("button");
   again.type = "button";
