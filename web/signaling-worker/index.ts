@@ -2,13 +2,28 @@
 //
 // Routes (all under /):
 //   POST /reserve/{roomId}                       -> 200 OK | 409 conflict | 500
-//   POST /signal/{roomId}/host/{type}            -> offer / ice
-//   POST /signal/{roomId}/guest/{type}           -> answer / ice
-//   GET  /signal/{roomId}/host/{type}            -> long-poll for guest's
-//                                                   answer/ice
-//   GET  /signal/{roomId}/guest/{type}           -> long-poll for host's
-//                                                   offer/ice
+//   POST /signal/{roomId}/host/{type}            -> write the HOST's slot
+//                                                   (offer / ice)
+//   POST /signal/{roomId}/guest/{type}           -> write the GUEST's slot
+//                                                   (answer / ice)
+//   GET  /signal/{roomId}/host/{type}            -> read the HOST's slot
+//   GET  /signal/{roomId}/guest/{type}           -> read the GUEST's slot
 //   DELETE /signal/{roomId}                      -> tear the room down
+//
+// THE RELAY DOES NOT SWAP ROLES. A GET reads back exactly the slot its own
+// path names — the same `{role}:{type}:{roomId}` key the matching POST
+// wrote. So each side POSTs under its OWN role and must GET the OTHER
+// side's role: the guest reads `/host/offer`, the host reads
+// `/guest/answer`, and each reads the other's `/ice`.
+//
+// This block previously claimed the opposite — that GET .../host/{type}
+// long-polls for the guest's answer — describing a swap this code has
+// never done. src/pvp/peer.ts was written to match that comment rather
+// than the handler below, polling its own role's slot, so no offer,
+// answer or ICE candidate could ever be read back: vs-Friend was broken
+// from its first commit (2026-08-11) until 2026-08-13. If you are about
+// to "fix" the client back to polling its own role, read the GET branch
+// in `fetch` first — the key is built from the path's role, unchanged.
 //
 // Storage: a single Workers KV namespace `SIGNAL` with a 5-minute TTL.
 // Keys:
