@@ -8,6 +8,11 @@
 # `npm ci` is deliberately first and unforgiving (no --legacy-peer-deps): a
 # lockfile that cannot be installed from a clean checkout is the failure this
 # job exists to catch.
+#
+# A dedicated e2e job (mirrors hex/dots-and-boxes/reversi's web-ci.yml)
+# keeps a typecheck/lint/test/build failure reporting fast without waiting
+# on a Playwright browser download and the full e2e suite; it depends on
+# the `web` job so a broken build never gets to the slower job at all.
 
 name: Web CI
 
@@ -56,3 +61,33 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  e2e:
+    name: e2e (Playwright)
+    runs-on: ubuntu-latest
+    needs: web
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install from the lockfile
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run e2e
+        run: npm run e2e
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: web/playwright-report
+          retention-days: 5

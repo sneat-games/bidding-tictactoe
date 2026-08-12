@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- App/PWA icon source. Rasterized to public/icons/icon-192.png and
+       icon-512.png by scripts/gen-icons.mjs. Indigo (accent colour, see
+       global.css) background with a mini tic-tac-toe motif: a 3x3 grid, an
+       X in the top-left cell, an O in the bottom-right (the same
+       stroke-only circle as Layout.astro's favicon). Content stays within a
+       centred safe zone so this also works as a maskable icon per the PWA
+       manifest's maskable purpose entries. -->
+  <rect width="512" height="512" rx="96" fill="#4f46e5" />
+
+  <!-- Faint 3x3 grid, centred, 260x260. -->
+  <g stroke="#ffffff" stroke-opacity="0.55" stroke-width="8" stroke-linecap="round">
+    <line x1="212.67" y1="126" x2="212.67" y2="386" />
+    <line x1="299.33" y1="126" x2="299.33" y2="386" />
+    <line x1="126" y1="212.67" x2="386" y2="212.67" />
+    <line x1="126" y1="299.33" x2="386" y2="299.33" />
+  </g>
+
+  <!-- X in the top-left cell. -->
+  <g stroke="#ffffff" stroke-width="15" stroke-linecap="round">
+    <line x1="145" y1="145" x2="194" y2="194" />
+    <line x1="194" y1="145" x2="145" y2="194" />
+  </g>
+
+  <!-- O in the bottom-right cell — a stroke-only circle, echoing the
+       favicon's ⭕ motif. -->
+  <circle cx="342.67" cy="342.67" r="31" fill="none" stroke="#ffffff" stroke-width="15" />
+</svg>

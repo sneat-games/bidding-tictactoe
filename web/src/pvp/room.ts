@@ -11,7 +11,15 @@ const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789".split(""); // 31 chars
 const CODE_LEN = 6;
 const MAX_RETRY = 10;
 
-const SIGNALING_BASE = ((import.meta as { env?: { SIGNALING_BASE?: string } }).env?.SIGNALING_BASE) ??
+// PUBLIC_SIGNALING_BASE (Astro's public-env prefix — exposed to client code
+// via import.meta.env, unlike an unprefixed var) lets e2e tests point this
+// at an isolated local signaling-worker instance instead of the
+// conventional :8787 a developer's `npm run relay`/`worker:dev` binds to —
+// see playwright.config.ts's comment for why a fixed local port can't be
+// assumed free on a machine that also runs the real webrtc-relay's own dev
+// server. Unset in every normal build (dev or production), so this branch
+// is inert outside e2e.
+const SIGNALING_BASE = ((import.meta as { env?: { PUBLIC_SIGNALING_BASE?: string } }).env?.PUBLIC_SIGNALING_BASE) ??
   (typeof window !== "undefined" && window.location?.hostname?.endsWith(".sneat.games")
     ? "https://signal.bidding-tictactoe.sneat.games"
     : "http://localhost:8787");

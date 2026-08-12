@@ -15,14 +15,29 @@ npm run dev          # http://localhost:4321 — SDK runs in `local` env
 npm run test         # vitest (engine, bot, room, bid-input)
 npm run typecheck    # astro check + tsc + worker tscconfigs
 npm run lint         # eslint flat config
-npm run build        # static dist/ → zippable for CrazyGames
+npm run build        # static dist/ → relative-path zippable for CrazyGames/itch.io
+npm run e2e          # Playwright (builds first — see playwright.config.ts)
+npm run gen-icons    # regenerate public/icons/*.png from src/assets/icon.svg
 ```
 
 To run the signaling relay locally:
 
 ```sh
 npm run worker:dev   # http://localhost:8787 — KV-backed relay
+npm run relay        # same thing, named to match the other Sneat Games repos
 ```
+
+`npm run e2e` builds and serves the app on its own port (4770, not 4321 —
+see playwright.config.ts) and starts a SECOND, isolated instance of this
+same signaling-worker on its own port (8798) rather than 8787: unlike the
+newer kit-based games, this repo's `src/pvp/room.ts` and `src/pvp/peer.ts`
+predate `@sneat/game-kit`'s shared `pvp/` module and speak this repo's own
+(non-gameId-namespaced) signaling protocol against its own deployed
+`signal.bidding-tictactoe.sneat.games` worker — reusing whatever happens to
+already be on 8787 locally (e.g. a real `webrtc-relay` dev instance, which
+speaks a different protocol) would silently break the PvP e2e journey
+instead of failing loudly. See playwright.config.ts's top comment for the
+full reasoning.
 
 ## Deploy
 

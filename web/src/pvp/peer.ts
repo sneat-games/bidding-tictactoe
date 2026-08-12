@@ -42,7 +42,10 @@ export interface PeerHandle {
   offClose(cb: () => void): void;
 }
 
-const SIGNALING_BASE = ((import.meta as { env?: { SIGNALING_BASE?: string } }).env?.SIGNALING_BASE) ??
+// See src/pvp/room.ts's identical constant for why this reads the Astro
+// public-env PUBLIC_SIGNALING_BASE (e2e-only override) rather than an
+// unprefixed var, and why the fallback stays :8787 for normal local dev.
+const SIGNALING_BASE = ((import.meta as { env?: { PUBLIC_SIGNALING_BASE?: string } }).env?.PUBLIC_SIGNALING_BASE) ??
   (typeof window !== "undefined" && window.location?.hostname?.endsWith(".sneat.games")
     ? "https://signal.bidding-tictactoe.sneat.games"
     : "http://localhost:8787");
@@ -57,13 +60,24 @@ interface SignalingClient {
 }
 
 function signalingClient(roomId: string, host: boolean): SignalingClient {
-  const role = host ? "host" : "guest";
+  // Bug fixed here (found while wiring up the vs-Friend e2e journey): `post`
+  // and `poll` MUST use different role segments. Each party POSTS under its
+  // OWN role slot (offer/ice for host, answer/ice for guest), but must POLL
+  // the OTHER party's slot to ever see what they posted — polling your own
+  // role, as this used to do unconditionally, reads back only what you
+  // yourself wrote (or nothing, for "answer"/"offer", which only the other
+  // side ever posts), so an offer/answer/ICE exchange could never complete.
+  // This silently broke every vs-Friend match: hostPeer's `waitFor("answer",
+  // 60_000)` and guestPeer's `waitFor("offer", 60_000)` would each poll a
+  // slot nobody writes and simply time out.
+  const ownRole = host ? "host" : "guest";
+  const peerRole = host ? "guest" : "host";
   return {
     host,
     roomId,
     async post(type, body) {
       const res = await fetch(
-        `${SIGNALING_BASE}/signal/${encodeURIComponent(roomId)}/${role}/${type}`,
+        `${SIGNALING_BASE}/signal/${encodeURIComponent(roomId)}/${ownRole}/${type}`,
         {
           method: "POST",
           headers: { "content-type": "text/plain" },
@@ -74,7 +88,7 @@ function signalingClient(roomId: string, host: boolean): SignalingClient {
     },
     async poll(type) {
       const res = await fetch(
-        `${SIGNALING_BASE}/signal/${encodeURIComponent(roomId)}/${role}/${type}`,
+        `${SIGNALING_BASE}/signal/${encodeURIComponent(roomId)}/${peerRole}/${type}`,
       );
       if (res.status === 404) return null;
       if (!res.ok) throw new Error(`signing poll ${type}: ${res.status}`);
@@ -186,19 +200,33 @@ async function waitFor(
 
 async function drainIce(sig: SignalingClient, pc: RTCPeerConnection, type: "ice"): Promise<void> {
   const deadline = Date.now() + 60_000;
+  // Bug fixed here (found alongside signalingClient's role mix-up above):
+  // ICE candidates accumulate newline-separated in the SAME slot (see
+  // signaling-worker/index.ts's casAppend) — every poll returns the FULL
+  // history so far, not just what's new since the last poll. Parsing that
+  // whole string as one JSON document threw past the first candidate
+  // ("Unexpected non-whitespace character after JSON"), which
+  // addIceCandidate's catch below silently swallowed — so at most ONE ICE
+  // candidate per peer ever actually got added, no matter how many the
+  // browser gathered. `processed` tracks how many lines this call has
+  // already added, so each poll only parses and adds the NEW lines.
+  let processed = 0;
   while (Date.now() < deadline) {
     const v = await sig.poll(type);
     if (v !== null && v.length > 0) {
-      try {
-        const candidate = JSON.parse(v) as RTCIceCandidateInit;
-        await pc.addIceCandidate(candidate);
-      } catch (e) {
-        // Late candidates may arrive after close; safe to ignore.
-        console.debug("[pvp] addIceCandidate ignored", e);
+      const lines = v.split("\n").filter((line) => line.length > 0);
+      for (const line of lines.slice(processed)) {
+        try {
+          const candidate = JSON.parse(line) as RTCIceCandidateInit;
+          await pc.addIceCandidate(candidate);
+        } catch (e) {
+          // Late/malformed candidates may arrive after close; safe to ignore.
+          console.debug("[pvp] addIceCandidate ignored", e);
+        }
       }
-    } else {
-      await sleep(200);
+      processed = lines.length;
     }
+    await sleep(200);
   }
 }
 

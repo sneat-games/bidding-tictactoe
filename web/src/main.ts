@@ -11,7 +11,7 @@
 // (full SDK).
 
 import { initSdk, isSdkAvailable, isInstantMultiplayer, inviteParams, addSettingsChangeListener, getSettings, gameplayStart, gameplayStop, loadingStart, loadingStop, leftRoom } from "./crazygames/sdk";
-import { createThemeToggle, createGamesFooter } from "@sneat/game-kit";
+import { createThemeToggle, createGamesFooter, registerServiceWorker } from "@sneat/game-kit";
 import { roomIdFromLocation } from "./pvp/room";
 import { renderMenu } from "./ui/menu";
 import { runVsBot } from "./ui/vs-bot";
@@ -22,6 +22,20 @@ export async function bootstrap() {
   // delays (or is delayed by) the instant-menu path below.
   mountThemeToggle();
   mountGamesFooter();
+  // The built service worker (see astro.config.mjs's `injectRegister:
+  // false`) registers only on this game's real deploy surface — never in
+  // `astro dev` (which has no /sw.js to register in the first place), and
+  // never inside a CrazyGames/itch.io iframe (docs/DESIGN.md "Offline").
+  // The kit's default gate (hostname.endsWith(".sneat.games")) implements
+  // exactly that. Using @sneat/game-kit's registerServiceWorker() here —
+  // never a bare `navigator.serviceWorker.register()` — matters: with
+  // `injectRegister: false`, `registerType: "autoUpdate"` is INERT, so a
+  // bare register() leaves every returning player frozen on the build they
+  // first loaded (APP-PLAYBOOK gotcha 9). The kit's version does the full
+  // update dance: promotes a worker left waiting by an earlier visit,
+  // promotes a newly-installed one when a controller already exists, and
+  // reloads once on controllerchange.
+  void registerServiceWorker();
 
   loadingStart();
   try {

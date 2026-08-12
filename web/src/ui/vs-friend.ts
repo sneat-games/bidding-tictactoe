@@ -13,7 +13,7 @@
 // abandoned with a notice rather than resolved by guesswork.
 
 import { Mark, Outcome, newGame, resolveTurn, boardOutcome, Game, Move } from "../engine/btttplay";
-import { reserveRoomId } from "../pvp/room";
+import { reserveRoomId, shareLinkFor } from "../pvp/room";
 import { hostPeer, guestPeer, WireMessage, PeerHandle, commitFor, verifyReveal, newSalt } from "../pvp/peer";
 import { openTurnInbox } from "../pvp/turn-inbox";
 import { askMove } from "./ask-move";
@@ -49,18 +49,28 @@ export async function runVsFriend(
       roomId = await reserveRoomId();
       cg.updateRoom({ roomId, isJoinable: true, inviteParams: { roomId } });
       const cgShareLink = cg.inviteLink({ roomId });
-      const { peer: p, inviteLinkUrl } = await hostPeer({ roomId });
-      peer = p;
+      // Render the invite UI BEFORE awaiting hostPeer: hostPeer blocks until
+      // the guest's answer arrives, which can only happen once the guest has
+      // read this room code — awaiting it first would leave the host staring
+      // at a blank screen with nothing to share, deadlocked against a guest
+      // who can never connect (see game-kit/docs/APP-PLAYBOOK.md gotcha 5).
+      // shareLinkFor builds the same link hostPeer's own inviteLinkUrl would
+      // (both from roomId, already known here), so nothing waits on the peer.
+      const base = typeof window !== "undefined" ? `${window.location.origin}${window.location.pathname}` : "";
       renderInvite(root, {
         roomId,
-        shareLink: inviteLinkUrl(typeof window !== "undefined" ? `${window.location.origin}${window.location.pathname}` : ""),
+        shareLink: shareLinkFor(base, roomId),
         cgShareLink,
       });
+      const { peer: p } = await hostPeer({ roomId });
+      peer = p;
     } else {
       if (!roomId) throw new Error("missing room id");
       cg.updateRoom({ roomId, isJoinable: true, inviteParams: { roomId } });
-      peer = await guestPeer({ roomId });
+      // Same ordering fix as the host branch above: show "Joined room…
+      // Connecting…" before blocking on guestPeer, not after.
       renderJoined(root, roomId);
+      peer = await guestPeer({ roomId });
     }
     await playMatchLoop(root, peer!);
   } finally {

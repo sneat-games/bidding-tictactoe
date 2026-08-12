@@ -1,6 +1,11 @@
 /dist
 /node_modules
 /.astro
-/.wrangler
+# Unanchored (not "/.wrangler"): host-worker/, signaling-worker/ and any
+# future worker each get their own local wrangler state dir, not just the
+# web/ root — an anchored pattern here missed all of them.
+.wrangler
 *.log
 .DS_Store
+/test-results
+/playwright-report

@@ -6,11 +6,22 @@ import astro from "eslint-plugin-astro";
 import globals from "globals";
 
 export default [
-  { ignores: ["dist", "node_modules", ".astro", ".wrangler", "host-worker", "signaling-worker"] },
+  {
+    ignores: [
+      "dist",
+      "node_modules",
+      ".astro",
+      ".wrangler",
+      "host-worker",
+      "signaling-worker",
+      "test-results",
+      "playwright-report",
+    ],
+  },
   js.configs.recommended,
   ...astro.configs.recommended,
   {
-    files: ["src/**/*.ts", "signaling-worker/**/*.ts"],
+    files: ["src/**/*.ts", "e2e/**/*.ts", "signaling-worker/**/*.ts", "scripts/**/*.mjs", "*.config.ts", "*.config.mjs"],
     languageOptions: {
       parser: tsParser,
       parserOptions: { ecmaVersion: 2022, sourceType: "module" },
