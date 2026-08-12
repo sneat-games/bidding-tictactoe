@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "bidding-tictactoe-sneat-games",
+  "name": "bidding-tictactoe-game",
   "main": "index.ts",
   "compatibility_date": "2025-08-11",
   "compatibility_flags": ["nodejs_compat"],
