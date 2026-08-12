@@ -19,8 +19,8 @@
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.4",
-    "@cloudflare/workers-types": "^4.20250807.0",
-    "@eslint/js": "^10.0.1",
+    "@cloudflare/workers-types": "^5.20260804.1",
+    "@eslint/js": "^9.10.0",
     "@types/node": "^22.10.0",
     "@typescript-eslint/eslint-plugin": "^8.10.0",
     "@typescript-eslint/parser": "^8.10.0",

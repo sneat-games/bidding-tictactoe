@@ -1,26 +1,40 @@
-// vs-friend screen. Hosts a private room (post /reserve, generate share
-// link), or joins an existing room as the guest (peer.ts handles the
-// WebRTC dance through the CF Worker signaling relay).
+// vs-friend screen. Hosts a private room (reserve a code, share a link), or
+// joins an existing room as the guest; peer.ts handles the WebRTC dance
+// through the CF Worker signaling relay.
 //
 // Once the DataChannel is open, both peers exchange hidden-bid moves using
-// the commit-reveal protocol in peer.ts. After a win/draw the peers can
-// rematch in the same room without navigating back through the menu.
-// A right-side game log shows each turn's winning (green) and losing (red)
-// bids plus running budget bars.
+// the commit-reveal protocol in peer.ts, on the 2x2 match screen (balances +
+// bid panel on top, board + game log below). After a win/draw the peers can
+// rematch in the same room.
+//
+// Turn clock: each client auto-submits only its OWN move when a deadline
+// expires (see turn-clock.ts), so a timeout can never leave the two boards
+// disagreeing. When a peer stops answering altogether, the match is
+// abandoned with a notice rather than resolved by guesswork.
 
-import { Mark, Outcome, newGame, resolveTurn, boardOutcome, markString, outcomeString, Game, Move } from "../engine/btttplay";
-import { createBidInput } from "./bid-input";
+import { Mark, Outcome, newGame, resolveTurn, boardOutcome, outcomeString, Game, Move } from "../engine/btttplay";
 import { reserveRoomId } from "../pvp/room";
 import { hostPeer, guestPeer, WireMessage, PeerHandle, commitFor, verifyReveal, newSalt } from "../pvp/peer";
-import { createGameLog } from "./game-log";
+import { openTurnInbox } from "../pvp/turn-inbox";
+import { askMove } from "./ask-move";
+import { createMatchScreen, turnResultText, type MatchScreen } from "./match-screen";
 import * as cg from "../crazygames/sdk";
 
 const BUDGET = 100;
 
-type PendingCommit = {
-  commit: string;
-  cell: number;
-};
+/** How long to wait for a peer's message before declaring them gone. Their
+ *  own clock forces a move within STALL_MS, so silence past this is a dead
+ *  tab, not a slow player. */
+const PEER_GRACE_MS = 45_000;
+
+/** Thrown when the opponent stops responding mid-match. Never resolves a
+ *  turn — it abandons the match, so both sides can only ever agree. */
+class PeerGoneError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PeerGoneError";
+  }
+}
 
 export async function runVsFriend(
   root: HTMLElement,
@@ -31,7 +45,6 @@ export async function runVsFriend(
 
   try {
     if (opts.as === "host") {
-      // Reserve a fresh unique room id.
       roomId = await reserveRoomId();
       cg.updateRoom({ roomId, isJoinable: true, inviteParams: { roomId } });
       const cgShareLink = cg.inviteLink({ roomId });
@@ -89,204 +102,222 @@ function renderJoined(root: HTMLElement, roomId: string) {
 }
 
 async function playMatchLoop(root: HTMLElement, peer: PeerHandle): Promise<void> {
-  while (true) {
-    let game = newGame(BUDGET);
-    const human = peer.youAre;
+  const human = peer.youAre;
+  const screen = createMatchScreen({
+    root,
+    initialBudget: BUDGET,
+    xLabel: human === Mark.X ? "You (X)" : "Friend (X)",
+    oLabel: human === Mark.O ? "You (O)" : "Friend (O)",
+  });
 
-    // Two-column layout: board area (left) + game log (right).
-    root.innerHTML = "";
-    const screen = document.createElement("div");
-    screen.className = "game-screen";
-    const boardArea = document.createElement("div");
-    boardArea.className = "game-screen__board";
-    const logArea = document.createElement("div");
-    logArea.className = "game-screen__log";
-    const log = createGameLog({
-      initialBudget: BUDGET,
-      xLabel: peer.youAre === Mark.X ? "You (X)" : "Friend (X)",
-      oLabel: peer.youAre === Mark.O ? "You (O)" : "Friend (O)",
-    });
-    logArea.append(log.el);
-    screen.append(boardArea, logArea);
-    root.append(screen);
+  for (;;) {
+    const game = newGame(BUDGET);
+    let outcome: Outcome;
+    try {
+      outcome = await playTurns(screen, peer, game, human);
+    } catch (e) {
+      if (e instanceof PeerGoneError) {
+        await renderAbandoned(screen, e.message);
+        return;
+      }
+      throw e;
+    }
 
-    const outcome = await playTurns(boardArea, peer, game, human, log);
-    const again = await renderFinal(boardArea, outcome, game);
-    // Coordinate rematch with the other peer.
-    let otherWantsRematch = false;
-    const rematchPromise = new Promise<boolean>((resolve) => {
-      const cb = (msg: WireMessage) => {
-        if (msg.kind === "rematch-request") {
-          otherWantsRematch = true;
-          peer.send({ kind: "rematch-accept" });
-          resolve(true);
-        } else if (msg.kind === "rematch-accept") {
-          resolve(true);
-        }
-      };
-      peer.onMessage(cb);
-    });
-    if (again) {
-      peer.send({ kind: "rematch-request" });
-      await rematchPromise;
-    } else {
-      peer.send({ kind: "leave" });
+    const again = await renderFinal(screen, outcome, game, human);
+    if (!again) {
+      trySend(peer, { kind: "leave" });
       return;
     }
-    void otherWantsRematch;
+    const accepted = await negotiateRematch(peer);
+    if (!accepted) {
+      await renderAbandoned(screen, "Your friend left the room.");
+      return;
+    }
+    screen.reset();
   }
 }
 
 async function playTurns(
-  root: HTMLElement,
+  screen: MatchScreen,
   peer: PeerHandle,
   game: Game,
   human: Mark,
-  log: ReturnType<typeof createGameLog>,
 ): Promise<Outcome> {
   let turn = 0;
   while (boardOutcome(game.board) === Outcome.Ongoing) {
-    await playOnePvpTurn(root, peer, game, turn, human, log);
+    await playOnePvpTurn(screen, peer, game, turn, human);
     turn++;
   }
   return boardOutcome(game.board);
 }
 
 async function playOnePvpTurn(
-  root: HTMLElement,
+  screen: MatchScreen,
   peer: PeerHandle,
   game: Game,
   turn: number,
   human: Mark,
-  log: ReturnType<typeof createGameLog>,
 ): Promise<void> {
-  renderBoard(root, game, human);
-  const humanMove = await askHuman(root, game, human);
-  const salt = newSalt();
-  const commit = await commitFor(humanMove, salt);
-  peer.send({ kind: "commit", turn, commit, cell: humanMove.cell });
+  const myIdx = human === Mark.X ? 0 : 1;
+  const oppIdx = myIdx === 0 ? 1 : 0;
 
-  // Wait for opponent commit + reveal.
-  const pending = await waitForCommit(peer, turn);
-  // Send reveal.
-  peer.send({ kind: "reveal", turn, bid: humanMove.bid, salt });
-  const oppReveal = await waitForReveal(peer, turn);
-  const verified = await verifyReveal(pending.commit, { bid: oppReveal.bid, cell: pending.cell }, oppReveal.salt);
-  if (!verified) throw new Error("opponent reveal failed verification");
+  screen.renderBoard(game.board);
 
-  const xMove: Move = human === Mark.X ? humanMove : { bid: oppReveal.bid, cell: pending.cell };
-  const oMove: Move = human === Mark.X ? { bid: oppReveal.bid, cell: pending.cell } : humanMove;
-  const budgetsBefore: [number, number] = [game.budget[0], game.budget[1]];
-  const { game: next, result } = resolveTurn(game, xMove, oMove);
-  Object.assign(game, next);
-  // Re-render the board with the post-move state so the winning mark
-  // is visible (and the prompt/submit UI is cleared).
-  renderBoard(root, game, human);
-  renderTurnResult(root, result, game, human);
-  log.append({
-    turn,
-    result,
-    xMove,
-    oMove,
-    budgetsBefore,
-    budgetsAfter: [game.budget[0], game.budget[1]],
-  });
-}
-
-function renderBoard(root: HTMLElement, game: Game, human: Mark) {
-  root.innerHTML = "";
-  const board = document.createElement("div");
-  board.className = "board";
-  for (let i = 0; i < 9; i++) {
-    const cell = document.createElement("button");
-    cell.type = "button";
-    cell.className = "board__cell";
-    cell.setAttribute("data-cell", String(i));
-    cell.textContent = markString(game.board[i]);
-    if (game.board[i] !== 0 /* Empty */) cell.disabled = true;
-    board.appendChild(cell);
-  }
-  const status = document.createElement("p");
-  status.className = "status";
-  status.textContent = `You are ${markString(human)}. Budgets — You: ${game.budget[human === Mark.X ? 0 : 1]}, Friend: ${game.budget[human === Mark.X ? 1 : 0]}.`;
-  root.append(board, status);
-}
-
-async function askHuman(root: HTMLElement, game: Game, human: Mark): Promise<{ bid: number; cell: number }> {
-  const remaining = game.budget[human === Mark.X ? 0 : 1];
-  const bid = createBidInput({ max: remaining, initial: Math.floor(remaining / 2) });
-  const prompt = document.createElement("div");
-  prompt.className = "prompt";
-  prompt.append("Pick your bid, then click a cell to commit:", bid.el);
-  root.append(prompt);
-  const cells = root.querySelectorAll<HTMLButtonElement>(".board__cell");
-  return new Promise((resolve) => {
-    cells.forEach((c) => {
-      if (c.disabled) return;
-      c.addEventListener("click", () => {
-        const cell = parseInt(c.dataset.cell ?? "", 10);
-        resolve({ bid: bid.value(), cell });
-      });
+  // Listen before waiting — see turn-inbox.ts.
+  const inbox = openTurnInbox(peer, turn);
+  try {
+    const myMove = await askMove({
+      boardArea: screen.boardArea,
+      bidPanel: screen.bidPanel,
+      board: game.board,
+      me: human,
+      ownBalance: game.budget[myIdx],
+      opponentBalance: game.budget[oppIdx],
+      opponentBidIn: inbox.hasCommit(),
+      onOpponentBid: (fn) => inbox.onCommit(fn),
     });
-  });
+
+    const salt = newSalt();
+    peer.send({ kind: "commit", turn, commit: await commitFor(myMove, salt), cell: myMove.cell });
+
+    screen.bidPanel.setWaiting("Bid committed. Waiting for your friend…");
+    const oppCommit = await orPeerGone(inbox, inbox.commit(), "Your friend stopped responding.");
+
+    peer.send({ kind: "reveal", turn, bid: myMove.bid, salt });
+    const oppReveal = await orPeerGone(inbox, inbox.reveal(), "Your friend stopped responding.");
+
+    const oppMove: Move = { bid: oppReveal.bid, cell: oppCommit.cell };
+    if (!(await verifyReveal(oppCommit.commit, oppMove, oppReveal.salt))) {
+      throw new PeerGoneError("Your friend's revealed bid did not match their commitment.");
+    }
+
+    const xMove: Move = human === Mark.X ? myMove : oppMove;
+    const oMove: Move = human === Mark.X ? oppMove : myMove;
+    const budgetsBefore: [number, number] = [game.budget[0], game.budget[1]];
+
+    const { game: next, result } = resolveTurn(game, xMove, oMove);
+    Object.assign(game, next);
+    // Re-render with the post-move state so the winning mark is visible.
+    screen.renderBoard(game.board);
+    screen.setNote(turnResultText(result));
+    screen.appendTurn({
+      turn,
+      result,
+      xMove,
+      oMove,
+      budgetsBefore,
+      budgetsAfter: [game.budget[0], game.budget[1]],
+    });
+  } finally {
+    inbox.close();
+  }
 }
 
-function waitForCommit(peer: PeerHandle, turn: number): Promise<PendingCommit> {
+/**
+ * Await `p`, but give up if the peer goes away or simply stops talking.
+ * Rejecting with PeerGoneError abandons the match; it never substitutes a
+ * move, so the two boards cannot diverge.
+ */
+function orPeerGone<T>(inbox: ReturnType<typeof openTurnInbox>, p: Promise<T>, message: string): Promise<T> {
+  const gone = inbox.closed().then(() => {
+    throw new PeerGoneError("Your friend left the room.");
+  });
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new PeerGoneError(message)), PEER_GRACE_MS);
+  });
+  return Promise.race([p, gone, timeout]).finally(() => clearTimeout(timer)) as Promise<T>;
+}
+
+/** Ask for a rematch and wait for the other side to agree. */
+function negotiateRematch(peer: PeerHandle): Promise<boolean> {
   return new Promise((resolve) => {
-    const cb = (msg: WireMessage) => {
-      if (msg.kind === "commit" && msg.turn === turn) {
-        resolve({ commit: msg.commit, cell: msg.cell });
+    const settle = (v: boolean) => {
+      peer.offMessage(onMessage);
+      peer.offClose(onClose);
+      clearTimeout(timer);
+      resolve(v);
+    };
+    const onMessage = (msg: WireMessage) => {
+      if (msg.kind === "rematch-request") {
+        trySend(peer, { kind: "rematch-accept" });
+        settle(true);
+      } else if (msg.kind === "rematch-accept") {
+        settle(true);
+      } else if (msg.kind === "leave") {
+        settle(false);
       }
     };
-    peer.onMessage(cb);
+    const onClose = () => settle(false);
+    const timer = setTimeout(() => settle(false), PEER_GRACE_MS);
+    peer.onMessage(onMessage);
+    peer.onClose(onClose);
+    trySend(peer, { kind: "rematch-request" });
   });
 }
 
-function waitForReveal(peer: PeerHandle, turn: number): Promise<{ bid: number; salt: string }> {
-  return new Promise((resolve) => {
-    const cb = (msg: WireMessage) => {
-      if (msg.kind === "reveal" && msg.turn === turn) {
-        resolve({ bid: msg.bid, salt: msg.salt });
-      }
-    };
-    peer.onMessage(cb);
-  });
+/** Send best-effort: a closed channel is a peer that has already left, which
+ *  the caller handles through its own close/timeout path. */
+function trySend(peer: PeerHandle, msg: WireMessage) {
+  try {
+    peer.send(msg);
+  } catch (e) {
+    console.debug("[pvp] send skipped", e);
+  }
 }
 
-function renderTurnResult(
-  root: HTMLElement,
-  result: ReturnType<typeof resolveTurn>["result"],
-  game: Game,
-  human: Mark,
-) {
-  const line = document.createElement("p");
-  line.className = "turn-result";
-  const tieNote = result.tieBreak ? " (tie-break)" : "";
-  line.textContent = `${markString(result.winner)} won the turn, took cell ${result.cell}, paid ${result.bid}${tieNote}.`;
-  root.append(line);
-  void game;
-  void human;
-}
 
 function renderFinal(
-  root: HTMLElement,
+  screen: MatchScreen,
   outcome: Outcome,
   game: Game,
+  human: Mark,
 ): Promise<boolean> {
+  screen.bidPanel.setWaiting("Match over.");
+
+  const myIdx = human === Mark.X ? 0 : 1;
   const banner = document.createElement("p");
   banner.className = "result-banner";
-  banner.textContent = `Game over: ${outcomeString(outcome)}. Budgets — You: ${game.budget[0]}, Friend: ${game.budget[1]}.`;
+  banner.textContent = `Game over: ${outcomeString(outcome)}. Balances — You: ${game.budget[myIdx]}, Friend: ${game.budget[myIdx === 0 ? 1 : 0]}.`;
+
   const again = document.createElement("button");
   again.type = "button";
   again.textContent = "Rematch (same friend)";
   again.className = "rematch";
+
   const leave = document.createElement("button");
   leave.type = "button";
   leave.textContent = "Leave";
   leave.className = "menu-btn";
-  root.append(banner, again, leave);
+
+  screen.controls.append(banner, again, leave);
   return new Promise((resolve) => {
-    again.addEventListener("click", () => resolve(true));
+    again.addEventListener("click", () => {
+      again.disabled = true;
+      again.textContent = "Waiting for your friend…";
+      resolve(true);
+    });
     leave.addEventListener("click", () => resolve(false));
+  });
+}
+
+/** Terminal notice for a match that ended without a result. Non-resolving by
+ *  design: no turn is decided on the missing player's behalf. */
+function renderAbandoned(screen: MatchScreen, message: string): Promise<void> {
+  screen.bidPanel.setWaiting("Match abandoned.");
+  screen.controls.innerHTML = "";
+
+  const banner = document.createElement("p");
+  banner.className = "result-banner";
+  banner.textContent = message;
+
+  const leave = document.createElement("button");
+  leave.type = "button";
+  leave.textContent = "Leave";
+  leave.className = "menu-btn";
+
+  screen.controls.append(banner, leave);
+  return new Promise((resolve) => {
+    leave.addEventListener("click", () => resolve());
   });
 }

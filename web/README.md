@@ -49,7 +49,8 @@ Before first deploy:
 
 - **vs Bot** — the bot strategy in `src/bot/bot.ts` plays the other side.
   The engine is the same TS port in `src/engine/btttplay.ts` that powers
-  vs-friend.
+  vs-friend. The bot commits its hidden bid at the start of the turn, so the
+  human always plays against the 10s answer clock.
 - **vs Friend** — inviter generates a 6-char room code (`src/pvp/room.ts`),
   reserves it on the signaling worker, and shares
   `https://bidding-tictactoe.sneat.games/#room=<code>`. The invitee opens
@@ -61,6 +62,43 @@ Before first deploy:
   `window.CrazyGames.SDK.game.updateRoom({...})`, so the Friends drawer,
   invite link, instant-multiplayer entry and room-join listener all work
   on top of the share-link fallback.
+
+## Match screen
+
+Both modes render one 2x2 grid (`src/ui/match-screen.ts`):
+
+```
+┌──────────────┬──────────────┐
+│ balances     │ bid panel    │
+├──────────────┼──────────────┤
+│ board        │ game log     │
+└──────────────┴──────────────┘
+```
+
+The left column is `--board-width` (the board's own width), so the balances
+card and the board are the same width; the right column is `--side-width`, so
+the bid panel and the game log are the same width. Below 720px the grid
+collapses to a single column in that same order.
+
+## Turn clock
+
+A turn is bounded by two deadlines (`src/ui/turn-clock.ts`), both applied by
+`src/ui/ask-move.ts` in both modes:
+
+| Situation | Deadline | Auto-submitted bid |
+|---|---|---|
+| The opponent's bid is in, yours is not | 10s | `0` — the only real bid wins and is transferred to you |
+| Neither player has bid | 30s | `floor(own / 2)`, or `opponent + 1` when strictly richer |
+
+Both are **self-enforced**: a client only ever auto-submits its OWN move,
+through the same commit-reveal path a manual move takes, so a timeout can
+never leave the two peers' boards disagreeing. When a peer stops answering
+altogether the match is abandoned with a notice rather than resolved by
+guesswork. The 10s clock replaces the 30s one as soon as either bid lands, and
+the pending auto-bid is shown in the bid panel before it fires.
+
+The clock is a session-layer rule — `resolveTurn` already discards the loser's
+cell, so neither `server-go/btttplay` nor its TS port changes to support it.
 
 ## CrazyGames submission
 
@@ -81,9 +119,11 @@ web/
 │   ├── engine/        vanilla TS port of server-go/btttplay + tests
 │   ├── bot/           baseline vs-bot strategy + tests
 │   ├── crazygames/    SDK v3 wrapper (init, env gate, settings, room)
-│   ├── pvp/           WebRTC peer.ts (commit-reveal), room.ts (6-char ids)
-│   ├── ui/            bid-input (linked slider + number), menu, vs-bot,
-│   │                  vs-friend screens
+│   ├── pvp/           WebRTC peer.ts (commit-reveal), room.ts (6-char ids),
+│   │                  turn-inbox.ts (per-turn message buffer)
+│   ├── ui/            match-screen (2x2 layout), balances, bid-panel,
+│   │                  game-log, bid-input, turn-clock, ask-move, menu,
+│   │                  vs-bot + vs-friend screens
 │   ├── pages/
 │   │   └── index.astro
 │   ├── layouts/
