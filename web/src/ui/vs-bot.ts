@@ -13,7 +13,7 @@
 import { Mark, Outcome, boardOutcome, newGame, resolveTurn, markString, Game, Move } from "../engine/btttplay";
 import { botMove } from "../bot/bot";
 import { askMove, MoveAbortedError } from "./ask-move";
-import { createConfirmButton } from "./confirm-button";
+import { createConfirmButton } from "@sneat/game-kit";
 import { createMatchScreen, renderMatchOver, type MatchScreen } from "./match-screen";
 import { VS_BOT_LATE_BID_MS } from "@sneat/game-kit";
 import { winningLine } from "./win-line";
