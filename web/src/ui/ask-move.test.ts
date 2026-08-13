@@ -2,9 +2,8 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { Mark, emptyBoard, parseBoard } from "../engine/btttplay";
 import { askMove, MoveAbortedError } from "./ask-move";
-import type { BidPanel } from "./bid-panel";
 import { createMatchScreen } from "./match-screen";
-import { LATE_BID_MS, STALL_MS, VS_BOT_LATE_BID_MS, stallBid } from "@sneat/game-kit";
+import { LATE_BID_MS, STALL_MS, VS_BOT_LATE_BID_MS, stallBid, type BidPanel } from "@sneat/game-kit";
 
 function setup(board = emptyBoard()) {
   const root = document.createElement("div");

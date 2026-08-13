@@ -18,7 +18,7 @@
 
 import { Board, Mark, Outcome, TurnResult, markString } from "../engine/btttplay";
 import { createBalances, type Balances } from "./balances";
-import { createBidPanel, type BidPanel } from "./bid-panel";
+import { createBidPanel, type BidPanel } from "@sneat/game-kit";
 import { createGameLog, type GameLog, type LogEntry } from "./game-log";
 
 export interface MatchScreen {
