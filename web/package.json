@@ -19,7 +19,7 @@
     "host:deploy": "wrangler deploy --config host-worker/wrangler.jsonc"
   },
   "dependencies": {
-    "@sneat/game-kit": "github:sneat-games/game-kit#v0.1.7"
+    "@sneat/game-kit": "github:sneat-games/game-kit#v0.1.8"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.4",

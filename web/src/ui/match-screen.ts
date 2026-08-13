@@ -63,7 +63,10 @@ export function createMatchScreen(opts: {
     p1Label: opts.xLabel,
     p2Label: opts.oLabel,
   });
-  const bidPanel = createBidPanel();
+  // BTTT's move IS a cell click, so say that rather than the kit's
+  // game-agnostic default — adopting the shared panel should not cost this
+  // game its own more precise copy (kit v0.1.8's `moveHint`).
+  const bidPanel = createBidPanel({ moveHint: "Click a cell to commit." });
   const log = createGameLog();
 
   const boardArea = document.createElement("div");
