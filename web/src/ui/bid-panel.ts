@@ -9,8 +9,7 @@
 // The countdown shows the bid that will be submitted for the player if they
 // let it run out, so an auto-bid is never a surprise.
 
-import { createBidInput, type BidInput } from "./bid-input";
-import { startCountdown, type Countdown } from "@sneat/game-kit";
+import { createBidInput, type BidInput, startCountdown, type Countdown } from "@sneat/game-kit";
 
 export interface ClockOptions {
   ms: number;
