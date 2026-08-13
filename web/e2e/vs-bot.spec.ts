@@ -14,8 +14,8 @@ test("vs Bot: commits bids and cells to a terminal banner with budgets transferr
   await chooseMode(page, "vs-bot");
 
   // Both start at the initial budget.
-  await expect.poll(() => balanceValue(page, "x")).toBe(100);
-  await expect.poll(() => balanceValue(page, "o")).toBe(100);
+  await expect.poll(() => balanceValue(page, "p1")).toBe(100);
+  await expect.poll(() => balanceValue(page, "p2")).toBe(100);
 
   // Commit a real (non-zero) bid on the first turn so a tie against the
   // bot's own (randomised) bid is vanishingly unlikely, without hard-coding
@@ -29,10 +29,10 @@ test("vs Bot: commits bids and cells to a terminal banner with budgets transferr
   // the total (200) is conserved but at least one side's balance must move
   // off 100.
   await expect
-    .poll(async () => (await balanceValue(page, "x")) + (await balanceValue(page, "o")), { timeout: 10_000 })
+    .poll(async () => (await balanceValue(page, "p1")) + (await balanceValue(page, "p2")), { timeout: 10_000 })
     .toBe(200);
   await expect
-    .poll(async () => (await balanceValue(page, "x")) !== 100 || (await balanceValue(page, "o")) !== 100, {
+    .poll(async () => (await balanceValue(page, "p1")) !== 100 || (await balanceValue(page, "p2")) !== 100, {
       timeout: 10_000,
     })
     .toBe(true);
@@ -47,7 +47,7 @@ test("vs Bot: commits bids and cells to a terminal banner with budgets transferr
   // Conservation holds at match end too: X's final balance + O's final
   // balance is always 200 — the auction only ever moves coins between the
   // two players, never creates or destroys them.
-  const finalX = await balanceValue(page, "x");
-  const finalO = await balanceValue(page, "o");
+  const finalX = await balanceValue(page, "p1");
+  const finalO = await balanceValue(page, "p2");
   expect(finalX + finalO).toBe(200);
 });

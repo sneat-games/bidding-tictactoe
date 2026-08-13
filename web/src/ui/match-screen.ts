@@ -17,8 +17,7 @@
 // the turn result used to go unread in every turn but the last.
 
 import { Board, Mark, Outcome, TurnResult, markString } from "../engine/btttplay";
-import { createBalances, type Balances } from "./balances";
-import { createBidPanel, type BidPanel } from "@sneat/game-kit";
+import { createBalances, type Balances, createBidPanel, type BidPanel } from "@sneat/game-kit";
 import { createGameLog, type GameLog, type LogEntry } from "./game-log";
 
 export interface MatchScreen {
@@ -61,8 +60,8 @@ export function createMatchScreen(opts: {
 
   const balances = createBalances({
     initialBudget: opts.initialBudget,
-    xLabel: opts.xLabel,
-    oLabel: opts.oLabel,
+    p1Label: opts.xLabel,
+    p2Label: opts.oLabel,
   });
   const bidPanel = createBidPanel();
   const log = createGameLog();

@@ -70,7 +70,7 @@ describe("match screen bookkeeping", () => {
     // the starting budget — the bar must fill, not overflow.
     const s = screen();
     s.appendTurn(entry);
-    const fill = s.balances.el.querySelector<HTMLElement>(".bar-fill--o")!;
+    const fill = s.balances.el.querySelector<HTMLElement>(".bar-fill--p2")!;
     expect(parseFloat(fill.style.width)).toBe(100);
   });
 

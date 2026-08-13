@@ -58,11 +58,19 @@
   :root:not([data-theme="light"]) {
     --x-colour: #22c55e;
     --o-colour: #ef4444;
+    /* The balances card (kit's ui/balances.ts) reads --p1/--p2 directly,
+       bypassing --x-colour/--o-colour — override the kit's own dark
+       --p1/--p2 back to this game's historical palette so the balance bars
+       keep matching the board in dark mode. */
+    --p1: #22c55e;
+    --p2: #ef4444;
   }
 }
 :root[data-theme="dark"] {
   --x-colour: #22c55e;
   --o-colour: #ef4444;
+  --p1: #22c55e;
+  --p2: #ef4444;
 }
 
 html.muted audio, html.muted video { display: none !important; }

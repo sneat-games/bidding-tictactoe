@@ -45,9 +45,10 @@ export async function playVsBotToEnd(page: Page, bid: number, maxTurns = 20): Pr
 }
 
 /** Parse a balances row's "Label: value/max" text into its numeric value.
- *  `player` is "x" | "o" (src/ui/balances.ts's `data-balance` values — this
- *  game has no p1/p2 concept, marks are X and O directly). */
-export async function balanceValue(page: Page, player: "x" | "o"): Promise<number> {
+ *  `player` is "p1" | "p2" (the kit's ui/balances.ts's `data-balance`
+ *  values — X is always p1 (budgets index 0) and O is always p2 (budgets
+ *  index 1); see match-screen.ts's createBalances call). */
+export async function balanceValue(page: Page, player: "p1" | "p2"): Promise<number> {
   const text = await page.locator(`[data-balance="${player}"] .balances__label`).innerText();
   const match = /:\s*(-?\d+)\/(\d+)/.exec(text);
   if (!match) throw new Error(`could not parse balance text: "${text}"`);

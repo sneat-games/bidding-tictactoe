@@ -59,8 +59,8 @@ test("PvP: invite link, both peers commit bids every turn, both boards agree on 
 
     // First-price transfer conservation holds on BOTH independently-computed
     // boards: X's final balance + O's final balance is always 200.
-    const hostTotal = (await balanceValue(host, "x")) + (await balanceValue(host, "o"));
-    const guestTotal = (await balanceValue(guest, "x")) + (await balanceValue(guest, "o"));
+    const hostTotal = (await balanceValue(host, "p1")) + (await balanceValue(host, "p2"));
+    const guestTotal = (await balanceValue(guest, "p1")) + (await balanceValue(guest, "p2"));
     expect(hostTotal).toBe(200);
     expect(guestTotal).toBe(200);
   } finally {
