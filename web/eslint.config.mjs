@@ -13,7 +13,6 @@ export default [
       ".astro",
       ".wrangler",
       "host-worker",
-      "signaling-worker",
       "test-results",
       "playwright-report",
     ],
@@ -21,7 +20,7 @@ export default [
   js.configs.recommended,
   ...astro.configs.recommended,
   {
-    files: ["src/**/*.ts", "e2e/**/*.ts", "signaling-worker/**/*.ts", "scripts/**/*.mjs", "*.config.ts", "*.config.mjs"],
+    files: ["src/**/*.ts", "e2e/**/*.ts", "scripts/**/*.mjs", "*.config.ts", "*.config.mjs"],
     languageOptions: {
       parser: tsParser,
       parserOptions: { ecmaVersion: 2022, sourceType: "module" },

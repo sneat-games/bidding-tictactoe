@@ -1,44 +1,36 @@
 import { defineConfig, devices } from "@playwright/test";
 
 // e2e webServer stack: a production-equivalent build served by `astro
-// preview`, plus a LOCAL signaling relay for the vs-Friend/PvP journey.
+// preview`, plus @sneat/game-kit's in-process relay mimic (`test-relay.mjs`)
+// for the vs-Friend/PvP journey — the same double hex/reversi/dots-and-boxes
+// use, now that this repo's src/ui/vs-friend.ts speaks the kit's shared
+// `pvp` module (hostPeer/guestPeer/reserveRoomId) against the shared
+// webrtc.sneat.games relay instead of its own bespoke signaling-worker.
 //
-// Unlike hex/dots-and-boxes/reversi, BTTT does not consume the kit's
-// pvp/room.ts + pvp/peer.ts modules or the shared webrtc-relay — it
-// predates them and still runs its own bespoke signaling protocol
-// (non-gameId-namespaced routes; see src/pvp/room.ts, src/pvp/peer.ts and
-// signaling-worker/index.ts) against its own deployed
-// signal.bidding-tictactoe.sneat.games worker. DESIGN.md notes "BTTT
-// migrates later" — that migration is out of scope here, and reshaping the
-// wire protocol to match the kit's gameId-namespaced test-relay.mjs would
-// require a coordinated client+worker deploy this task isn't chartered to
-// make. So this suite's "relay" is BTTT's OWN signaling-worker
-// (signaling-worker/index.ts), run locally via `wrangler dev` (local mode —
-// no Cloudflare account needed, verified) instead of
-// @sneat/game-kit/test-relay.mjs — the same purpose (an isolated, ephemeral,
-// local double instead of the real deployed relay), different backend.
+// UNLIKE every sibling's playwright.config.ts, this suite does NOT reuse the
+// kit's conventional :8787 (the port `defaultRelayBase()` picks for any
+// localhost origin, and the port every sibling's relay entry deliberately
+// shares with a developer's real `webrtc-relay` dev server). On this
+// machine something can legitimately already be listening on 8787 — a real
+// `webrtc-relay` dev instance, left running from other work — and while its
+// protocol IS compatible (gameId-namespaced, same as this suite's own),
+// this suite still wants an ISOLATED, disposable double: sharing 8787 would
+// run against whatever room state that real instance already holds, and a
+// stale room from a previous run could make a fresh test flaky in a way
+// that has nothing to do with this game. So RELAY_PORT is this repo's own,
+// and src/ui/vs-friend.ts is told about it at BUILD time via the Astro
+// public-env PUBLIC_RELAY_BASE (unset in every normal dev/production build,
+// so that branch is inert outside e2e; see vs-friend.ts's
+// `relayBaseOverride()`), fed straight into the kit's `relayBase` option on
+// every reserveRoomId/hostPeer/guestPeer call rather than changing the
+// kit's own :8787 default.
 //
-// RELAY_PORT is deliberately NOT the conventional :8787 a developer's
-// `npm run relay`/`worker:dev` binds to for manual testing. On this machine
-// something else can legitimately already be listening on 8787 — in
-// practice, an unrelated sibling repo's own real `webrtc-relay` dev server,
-// left running from earlier work. Reusing that would be actively wrong for
-// BTTT specifically (unlike hex/dots-and-boxes/reversi, whose relay clients
-// speak the SAME gameId-namespaced protocol a real webrtc-relay does): every
-// request would 404 as "route not found" against the wrong protocol, and
-// the failure would read as a broken PvP feature rather than a port
-// collision. So e2e gets its OWN port, and src/pvp/room.ts +
-// src/pvp/peer.ts are told about it at BUILD time via the Astro public-env
-// PUBLIC_SIGNALING_BASE (unset in every normal dev/production build, so
-// this is inert outside e2e) rather than changing those files' :8787
-// fallback, which stays exactly what `npm run relay`'s own doc comment and
-// the README's "npm run worker:dev # http://localhost:8787" promise.
-//
-// The relay's own routes 404 a plain GET / (see signaling-worker/index.ts's
-// parseRoute), so its entry uses `port` (a raw TCP-connect readiness check)
-// rather than `url`. reuseExistingServer is false on BOTH entries: a stale
-// or foreign occupant of either port must fail the run loudly (EADDRINUSE)
-// instead of silently testing against the wrong backend.
+// The relay's own routes all 404 a bare GET / (see test-relay.mjs), so its
+// entry uses `port` (a raw TCP-connect readiness check) rather than `url`.
+// Both entries set `reuseExistingServer: false`: a stale or foreign
+// occupant of either port must fail the run loudly (EADDRINUSE) instead of
+// silently testing against the wrong backend — this is what keeps the
+// isolation promise above real rather than aspirational.
 //
 // APP_PORT 4770 is this repo's OWN preview port, deliberately not 4321
 // (every sibling sneat-games app answers happily there) and not any port
@@ -46,7 +38,9 @@ import { defineConfig, devices } from "@playwright/test";
 // 6) — checked against hex (4761), dots-and-boxes (4791), reversi (4795),
 // gomoku (4762), four-in-a-row (4744), domineering (4799),
 // ultimate-tictactoe (4763), greed-game (4766), y-game (4374) at the time
-// this was picked.
+// this was picked. RELAY_PORT 8798 was this repo's own signaling-worker
+// port pre-migration and stays unclaimed by any sibling for the same
+// reason.
 const APP_PORT = 4770;
 const RELAY_PORT = 8798;
 
@@ -77,15 +71,18 @@ export default defineConfig({
       reuseExistingServer: false,
       timeout: 180_000,
       // Baked in at build time (Vite/Astro resolve import.meta.env.* during
-      // the build, not at runtime) — this is what points the built bundle's
-      // SIGNALING_BASE at RELAY_PORT instead of the :8787 default.
-      env: { PUBLIC_SIGNALING_BASE: `http://localhost:${RELAY_PORT}` },
+      // the build, not at runtime) — this is what points the built
+      // bundle's relayBase at RELAY_PORT instead of the kit's :8787 default.
+      env: { PUBLIC_RELAY_BASE: `http://localhost:${RELAY_PORT}` },
     },
     {
-      command: `wrangler dev --config signaling-worker/wrangler.jsonc --port ${RELAY_PORT}`,
+      // `npm run relay` takes no port itself (defaults to 8787, matching
+      // every sibling's manual-dev promise) — `-- ${RELAY_PORT}` forwards
+      // this suite's own port through to test-relay.mjs's `argv[2]`.
+      command: `npm run relay -- ${RELAY_PORT}`,
       port: RELAY_PORT,
       reuseExistingServer: false,
-      timeout: 60_000,
+      timeout: 20_000,
     },
   ],
 });

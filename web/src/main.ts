@@ -11,8 +11,7 @@
 // (full SDK).
 
 import { initSdk, isSdkAvailable, isInstantMultiplayer, inviteParams, addSettingsChangeListener, getSettings, gameplayStart, gameplayStop, loadingStart, loadingStop, leftRoom } from "./crazygames/sdk";
-import { createThemeToggle, createGamesFooter, registerServiceWorker } from "@sneat/game-kit";
-import { roomIdFromLocation } from "./pvp/room";
+import { createThemeToggle, createGamesFooter, registerServiceWorker, roomIdFromLocation } from "@sneat/game-kit";
 import { renderMenu } from "./ui/menu";
 import { runVsBot } from "./ui/vs-bot";
 import { runVsFriend } from "./ui/vs-friend";
@@ -65,7 +64,7 @@ export async function bootstrap() {
   //    a guest whose match ends should land on the menu, not on a dead
   //    board. The spent `#room=` fragment is dropped first so the next loop
   //    iteration doesn't rejoin the room that just finished.
-  const fromLink = roomIdFromLocation();
+  const fromLink = roomIdFromLocation(window.location.href);
   if (fromLink) {
     const cgParams = inviteParams();
     if (cgParams && cgParams.room === fromLink) {

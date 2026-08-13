@@ -2,13 +2,17 @@ import { test, expect, type Page } from "@playwright/test";
 import { chooseMode, balanceValue } from "./helpers";
 
 // Journey (docs/DESIGN.md "Testing"): host <-> guest full PvP match across
-// two browser contexts against a local relay double (playwright.config.ts's
-// second webServer — see its comment for why this is BTTT's own
-// signaling-worker rather than @sneat/game-kit/test-relay.mjs). Unlike
-// hex's classic mode (strict alternating placement), Bidding Tic-Tac-Toe's
-// PvP turn is SIMULTANEOUS: on every turn both peers independently commit a
-// hidden bid + cell, then reveal, and only the auction winner's cell is
-// placed — so both pages are clicked every turn, not one after the other.
+// two browser contexts against @sneat/game-kit's local relay double
+// (playwright.config.ts's second webServer, test-relay.mjs on its own
+// isolated port — see that file's comment for why it isn't the kit's usual
+// shared :8787). This exercises the SAME hostPeer/guestPeer/reserveRoomId
+// path src/ui/vs-friend.ts runs against the real webrtc.sneat.games relay in
+// production, gameId-namespaced ("bidding-tictactoe") like every other
+// sneat-games title. Unlike hex's classic mode (strict alternating
+// placement), Bidding Tic-Tac-Toe's PvP turn is SIMULTANEOUS: on every turn
+// both peers independently commit a hidden bid + cell, then reveal, and only
+// the auction winner's cell is placed — so both pages are clicked every
+// turn, not one after the other.
 
 test("PvP: invite link, both peers commit bids every turn, both boards agree on the result", async ({ browser }) => {
   test.setTimeout(90_000);

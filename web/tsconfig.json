@@ -5,8 +5,7 @@
     "paths": {
       "@engine/*": ["src/engine/*"],
       "@bot/*": ["src/bot/*"],
-      "@crazygames/*": ["src/crazygames/*"],
-      "@pvp/*": ["src/pvp/*"]
+      "@crazygames/*": ["src/crazygames/*"]
     },
     "target": "ES2022",
     "module": "ESNext",
@@ -19,5 +18,5 @@
     "types": ["vitest/globals"]
   },
   "include": ["src/**/*", "e2e/**/*", "*.config.*"],
-  "exclude": ["dist", "node_modules", "signaling-worker"]
+  "exclude": ["dist", "node_modules"]
 }

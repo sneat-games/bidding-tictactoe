@@ -2,63 +2,62 @@
 
 Client-only Astro + TypeScript web build of Bidding Tic-Tac-Toe, packaged
 for both CrazyGames and `bidding-tictactoe.sneat.games`. No server-side
-game state: vs-bot plays locally, vs-friend uses a tiny Cloudflare Worker
-signaling relay (no DB, no auth, no game state) plus WebRTC DataChannel with
-a commit-reveal protocol so neither peer sees the other's bid before
-commitment.
+game state: vs-bot plays locally, vs-friend uses `@sneat/game-kit`'s shared
+`pvp` module against the shared `sneat-games/webrtc-relay` deployment
+(`webrtc.sneat.games`, no DB, no auth, no game state — gameId-namespaced so
+this game's room codes can't collide with any other Sneat Games title's)
+plus WebRTC DataChannel with a commit-reveal protocol so neither peer sees
+the other's bid before commitment.
 
 ## Local development
 
 ```sh
 npm install
 npm run dev          # http://localhost:4321 — SDK runs in `local` env
-npm run test         # vitest (engine, bot, room, bid-input)
-npm run typecheck    # astro check + tsc + worker tscconfigs
+npm run test         # vitest (engine, bot, bid-input)
+npm run typecheck    # astro check + tsc + worker tsconfig
 npm run lint         # eslint flat config
 npm run build        # static dist/ → relative-path zippable for CrazyGames/itch.io
 npm run e2e          # Playwright (builds first — see playwright.config.ts)
 npm run gen-icons    # regenerate public/icons/*.png from src/assets/icon.svg
 ```
 
-To run the signaling relay locally:
+To run a local signaling relay double (same purpose as every other Sneat
+Games title — see `@sneat/game-kit`'s `test-relay.mjs`):
 
 ```sh
-npm run worker:dev   # http://localhost:8787 — KV-backed relay
-npm run relay        # same thing, named to match the other Sneat Games repos
+npm run relay        # http://localhost:8787 by default; in-memory, no auth
 ```
 
 `npm run e2e` builds and serves the app on its own port (4770, not 4321 —
-see playwright.config.ts) and starts a SECOND, isolated instance of this
-same signaling-worker on its own port (8798) rather than 8787: unlike the
-newer kit-based games, this repo's `src/pvp/room.ts` and `src/pvp/peer.ts`
-predate `@sneat/game-kit`'s shared `pvp/` module and speak this repo's own
-(non-gameId-namespaced) signaling protocol against its own deployed
-`signal.bidding-tictactoe.sneat.games` worker — reusing whatever happens to
-already be on 8787 locally (e.g. a real `webrtc-relay` dev instance, which
-speaks a different protocol) would silently break the PvP e2e journey
-instead of failing loudly. See playwright.config.ts's top comment for the
-full reasoning.
+see playwright.config.ts) and starts a SECOND, isolated instance of
+`test-relay.mjs` on its own port (8798) rather than the usual 8787: unlike
+every sibling kit-based game (which happily shares 8787 with a developer's
+real `webrtc-relay` dev server, since the protocol is identical either way),
+this suite wants an isolated double so a stale room from an earlier local
+run can never make a test flaky. See playwright.config.ts's top comment for
+the full reasoning.
 
 ## Deploy
 
 | Surface                | Worker                                          | Domain                                   |
 |------------------------|-------------------------------------------------|------------------------------------------|
 | Static game            | `web/host-worker/`                              | `bidding-tictactoe.sneat.games`          |
-| WebRTC signaling relay | `web/signaling-worker/`                         | `signal.bidding-tictactoe.sneat.games`  |
+| WebRTC signaling relay | `sneat-games/webrtc-relay` (shared, external)   | `webrtc.sneat.games`                     |
 | CrazyGames build       | `web/dist/` zip uploaded via Developer Portal   | `crazygames.com/game/bidding-tic-tac-toe`|
 
-Deploy workers:
+Deploy this repo's own worker:
 
 ```sh
 npm run host:deploy     # bidding-tictactoe.sneat.games
-npm run worker:deploy   # signal.bidding-tictactoe.sneat.games
 ```
 
-Before first deploy:
-- Create a KV namespace `SIGNAL` and put its id + preview_id into
-  `web/signaling-worker/wrangler.jsonc` (`binding: "SIGNAL"`).
-- Verify DNS for `bidding-tictactoe.sneat.games` and
-  `signal.bidding-tictactoe.sneat.games` point at Cloudflare.
+The WebRTC signaling relay is deployed and owned by the `sneat-games/
+webrtc-relay` repo, not this one — see that repo for its own deploy
+instructions. (This repo previously deployed its own signaling worker at
+`signal.bidding-tictactoe.sneat.games`; that deployment predates the
+gameId-namespaced shared relay and is being retired separately from this
+migration.)
 
 ## Modes
 
@@ -70,13 +69,15 @@ Before first deploy:
   `opponentBudget + 1`: the cheapest stake the opponent cannot outbid. A
   persistent **New game** button restarts a match at any point; it arms on the
   first click and only restarts on a second.
-- **vs Friend** — inviter generates a 6-char room code (`src/pvp/room.ts`),
-  reserves it on the signaling worker, and shares
+- **vs Friend** — inviter reserves a 6-char room code on the shared relay
+  (`@sneat/game-kit`'s `reserveRoomId`, namespaced `gameId:
+  "bidding-tictactoe"`) and shares
   `https://bidding-tictactoe.sneat.games/#room=<code>`. The invitee opens
   the link: the bootstrap in `src/main.ts` detects `#room=`, becomes the
-  guest, and establishes a WebRTC DataChannel through the signaling worker
-  (`src/pvp/peer.ts`). Moves run a commit-reveal protocol over the channel
-  so both peers' hidden bids stay hidden until both are committed.
+  guest, and establishes a WebRTC DataChannel through the shared relay
+  (`@sneat/game-kit`'s `hostPeer`/`guestPeer`, see `src/ui/vs-friend.ts`).
+  Moves run a commit-reveal protocol over the channel so both peers' hidden
+  bids stay hidden until both are committed.
 - On CrazyGames the same `roomId` is additionally pushed to
   `window.CrazyGames.SDK.game.updateRoom({...})`, so the Friends drawer,
   invite link, instant-multiplayer entry and room-join listener all work
@@ -182,12 +183,12 @@ web/
 │   ├── engine/        vanilla TS port of server-go/btttplay + tests
 │   ├── bot/           baseline vs-bot strategy + tests
 │   ├── crazygames/    SDK v3 wrapper (init, env gate, settings, room)
-│   ├── pvp/           WebRTC peer.ts (commit-reveal), room.ts (6-char ids),
-│   │                  turn-inbox.ts (per-turn message buffer)
 │   ├── ui/            match-screen (2x2 layout), balances, bid-panel,
 │   │                  game-log, bid-input, turn-clock, ask-move, menu,
 │   │                  win-line (end-of-match highlight), vs-bot + vs-friend
-│   │                  screens
+│   │                  screens (vs-friend.ts drives @sneat/game-kit's pvp
+│   │                  module: hostPeer/guestPeer/reserveRoomId/openTurnInbox/
+│   │                  commitPayload+verifyPayload)
 │   ├── styles/        global.css — @sneat/game-kit's theme.css (design
 │   │                  tokens, both themes, shared chrome) plus this game's
 │   │                  own board/mark/invite-screen styles, restated on the
@@ -197,28 +198,28 @@ web/
 │   ├── layouts/
 │   │   └── Layout.astro
 │   └── main.ts        bootstrap: invite-link / instant-multiplayer / menu
-├── signaling-worker/  CF Worker relay (KV, no DB, no auth)
 ├── host-worker/       CF Worker serving dist/ at bidding-tictactoe.sneat.games
 ├── astro.config.mjs
-├── tsconfig.json      web tsconfig (excludes signaling-worker; it has its own)
+├── tsconfig.json      web tsconfig
 ├── vitest.config.ts
 └── eslint.config.mjs
 ```
 
 ### `@sneat/game-kit` dependency
 
-The design system (tokens, both themes, the theme toggle, shared chrome
-components, and the cross-game promo footer) comes from
-`@sneat/game-kit` (`github:sneat-games/game-kit#v0.1.1`), pinned as a normal
-`dependencies` entry in `package.json`. The kit is public and MIT-licensed;
-this repo stays GPL-3.0 — consuming an MIT dependency from a GPL-3.0 project
-is fine (GPL projects may depend on more-permissively-licensed code). Only
-`@sneat/game-kit/theme.css` (CSS, zero JS cost) and a handful of named
-imports from the kit's main entry (`createThemeToggle`, `createGamesFooter`)
-are used; the rest of the kit (auction/, clock/, pvp/, its own CrazyGames SDK
-wrapper, its own board-agnostic UI components) is tree-shaken out of the
-build — this game keeps its own engine, bot, PvP transport and CrazyGames
-wrapper unchanged.
+`@sneat/game-kit` (`github:sneat-games/game-kit#v0.1.7`), pinned as a normal
+`dependencies` entry in `package.json`, supplies both the design system
+(tokens, both themes, the theme toggle, shared chrome components, the
+cross-game promo footer — `createThemeToggle`, `createGamesFooter`) and the
+PvP transport (`pvp/`: `hostPeer`, `guestPeer`, `reserveRoomId`,
+`roomIdFromLocation`, `shareLinkFor`, `openTurnInbox`, `commitPayload`/
+`verifyPayload`/`newSalt`) that `src/ui/vs-friend.ts` and `src/main.ts` run
+against the shared `webrtc.sneat.games` relay. The kit is public and
+MIT-licensed; this repo stays GPL-3.0 — consuming an MIT dependency from a
+GPL-3.0 project is fine (GPL projects may depend on more-permissively-
+licensed code). This game keeps its own engine, bot, game rules and
+CrazyGames wrapper — only the design system and the PvP transport are
+shared with the rest of the Sneat Games fleet.
 
 ## Go rule-of-record
 

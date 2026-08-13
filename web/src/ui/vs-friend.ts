@@ -1,9 +1,30 @@
 // vs-friend screen. Hosts a private room (reserve a code, share a link), or
-// joins an existing room as the guest; peer.ts handles the WebRTC dance
-// through the CF Worker signaling relay.
+// joins an existing room as the guest, over @sneat/game-kit's shared `pvp`
+// module (hostPeer/guestPeer/reserveRoomId) against the shared relay at
+// webrtc.sneat.games — game-kit/docs/DESIGN.md's PvP protocol v1.
+//
+// BTTT predates the kit (the kit was extracted FROM this game) and used to
+// carry its own peer.ts/room.ts/turn-inbox.ts against its own deployed
+// signal.bidding-tictactoe.sneat.games worker, un-namespaced by gameId. That
+// duplication is why vs-Friend shipped broken for two days (commit 777fb59):
+// a signaling bug fixed in this file's old code never reached the kit's copy
+// and vice versa. `gameId: "bidding-tictactoe"` below namespaces this game's
+// room codes on the shared relay so a fix in the kit's peer.ts now reaches
+// every game, this one included.
+//
+// The host already knows the (single) match shape; the guest joins straight
+// off a `#room=` link (see main.ts) and has never seen a menu, so it learns
+// nothing is left to negotiate only once the host's `hello` confirms
+// `{game, protocol, config}` match — same handshake every other kit-based
+// sneat-games title runs (see e.g. greed-game/web/src/ui/vs-friend.ts), even
+// though this game currently ships exactly one mode. Host is always player 0
+// (Mark.X); guest is player 1 (Mark.O) — game-kit/docs/DESIGN.md "Host is
+// P1" — so `human` is derived from `peer.role`, never sent ad hoc the way
+// this file's pre-migration `hello` type (declared but never actually sent)
+// used to imply.
 //
 // Once the DataChannel is open, both peers exchange hidden-bid moves using
-// the commit-reveal protocol in peer.ts, on the 2x2 match screen (balances +
+// the kit's commit-reveal primitives, on the 2x2 match screen (balances +
 // bid panel on top, board + game log below). After a win/draw the peers can
 // rematch in the same room.
 //
@@ -13,15 +34,37 @@
 // abandoned with a notice rather than resolved by guesswork.
 
 import { Mark, Outcome, newGame, resolveTurn, boardOutcome, Game, Move } from "../engine/btttplay";
-import { reserveRoomId, shareLinkFor } from "../pvp/room";
-import { hostPeer, guestPeer, WireMessage, PeerHandle, commitFor, verifyReveal, newSalt } from "../pvp/peer";
-import { openTurnInbox } from "../pvp/turn-inbox";
+import {
+  reserveRoomId,
+  shareLinkFor,
+  hostPeer,
+  guestPeer,
+  openTurnInbox,
+  commitPayload,
+  verifyPayload,
+  newSalt,
+  type PeerHandle,
+  type WireMessage,
+} from "@sneat/game-kit";
 import { askMove } from "./ask-move";
 import { createMatchScreen, renderMatchOver, type MatchScreen } from "./match-screen";
 import { winningLine } from "./win-line";
 import * as cg from "../crazygames/sdk";
 
+/** Namespaces this game's rooms on the shared relay; see webrtc-relay's
+ *  `[a-z0-9_-]{1,32}` gameId validation. */
+const GAME_ID = "bidding-tictactoe";
+const PROTOCOL = 1;
+const HELLO_TIMEOUT_MS = 20_000;
+
 const BUDGET = 100;
+
+/** The one match shape this build speaks — BTTT has no variant/size choice,
+ *  unlike hex/gomoku's classic-vs-bidding menu. The guest still checks this
+ *  against the host's `hello` rather than assuming, so a future rule change
+ *  or a stale client is a clean refusal instead of two peers silently
+ *  running different rules against each other. */
+const MATCH_CONFIG = { mode: "classic", budget: BUDGET } as const;
 
 /** How long to wait for a peer's message before declaring them gone. Their
  *  own clock forces a move within STALL_MS, so silence past this is a dead
@@ -37,16 +80,32 @@ class PeerGoneError extends Error {
   }
 }
 
+/**
+ * e2e-only relay override — see playwright.config.ts. Unset in every normal
+ * dev/production build (this branch is then inert), so the kit's own
+ * `defaultRelayBase()` (localhost:8787, or the real webrtc.sneat.games off
+ * localhost) applies. e2e needs an override because this repo's suite
+ * deliberately does NOT share the kit's conventional 8787 — a real
+ * `webrtc-relay` dev server can legitimately already be running there on a
+ * developer's machine, and adopting it would run this suite against
+ * whatever room state that instance happens to hold instead of an isolated,
+ * disposable double.
+ */
+function relayBaseOverride(): string | undefined {
+  return (import.meta as { env?: { PUBLIC_RELAY_BASE?: string } }).env?.PUBLIC_RELAY_BASE;
+}
+
 export async function runVsFriend(
   root: HTMLElement,
   opts: { as: "host" | "guest"; roomId?: string },
 ): Promise<void> {
   let peer: PeerHandle | null = null;
   let roomId = opts.roomId ?? "";
+  const relayBase = relayBaseOverride();
 
   try {
     if (opts.as === "host") {
-      roomId = await reserveRoomId();
+      roomId = await reserveRoomId({ gameId: GAME_ID, relayBase });
       cg.updateRoom({ roomId, isJoinable: true, inviteParams: { roomId } });
       const cgShareLink = cg.inviteLink({ roomId });
       // Render the invite UI BEFORE awaiting hostPeer: hostPeer blocks until
@@ -54,29 +113,76 @@ export async function runVsFriend(
       // read this room code — awaiting it first would leave the host staring
       // at a blank screen with nothing to share, deadlocked against a guest
       // who can never connect (see game-kit/docs/APP-PLAYBOOK.md gotcha 5).
-      // shareLinkFor builds the same link hostPeer's own inviteLinkUrl would
-      // (both from roomId, already known here), so nothing waits on the peer.
+      // shareLinkFor builds the same link from roomId (already known here),
+      // so nothing here waits on the peer.
       const base = typeof window !== "undefined" ? `${window.location.origin}${window.location.pathname}` : "";
       renderInvite(root, {
         roomId,
         shareLink: shareLinkFor(base, roomId),
         cgShareLink,
       });
-      const { peer: p } = await hostPeer({ roomId });
-      peer = p;
+      peer = await hostPeer({ gameId: GAME_ID, roomId, relayBase });
+      peer.send({ kind: "hello", game: GAME_ID, protocol: PROTOCOL, config: MATCH_CONFIG });
+      if (!(await waitForHelloAck(peer))) {
+        await renderRefused(root, "Your friend's app could not join this match.");
+        return;
+      }
     } else {
       if (!roomId) throw new Error("missing room id");
       cg.updateRoom({ roomId, isJoinable: true, inviteParams: { roomId } });
       // Same ordering fix as the host branch above: show "Joined room…
       // Connecting…" before blocking on guestPeer, not after.
       renderJoined(root, roomId);
-      peer = await guestPeer({ roomId });
+      peer = await guestPeer({ gameId: GAME_ID, roomId, relayBase });
+      if (!(await waitForHello(peer))) {
+        await renderRefused(root, "Could not agree the match settings with your friend.");
+        return;
+      }
+      peer.send({ kind: "hello-ack" });
     }
-    await playMatchLoop(root, peer!);
+    await playMatchLoop(root, peer);
   } finally {
     peer?.close();
     cg.leftRoom();
   }
+}
+
+function waitForHello(peer: PeerHandle): Promise<boolean> {
+  return new Promise((resolve) => {
+    let done = false;
+    const timer = setTimeout(() => finish(false), HELLO_TIMEOUT_MS);
+    function onMessage(msg: WireMessage) {
+      if (msg.kind !== "hello" || msg.game !== GAME_ID || msg.protocol !== PROTOCOL) return;
+      const config = msg.config as { mode?: unknown; budget?: unknown };
+      finish(config.mode === MATCH_CONFIG.mode && config.budget === MATCH_CONFIG.budget);
+    }
+    function finish(v: boolean) {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      peer.offMessage(onMessage);
+      resolve(v);
+    }
+    peer.onMessage(onMessage);
+  });
+}
+
+function waitForHelloAck(peer: PeerHandle): Promise<boolean> {
+  return new Promise((resolve) => {
+    let done = false;
+    const timer = setTimeout(() => finish(false), HELLO_TIMEOUT_MS);
+    function onMessage(msg: WireMessage) {
+      if (msg.kind === "hello-ack") finish(true);
+    }
+    function finish(v: boolean) {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      peer.offMessage(onMessage);
+      resolve(v);
+    }
+    peer.onMessage(onMessage);
+  });
 }
 
 function renderInvite(
@@ -147,8 +253,41 @@ function renderJoined(root: HTMLElement, roomId: string) {
   root.append(card);
 }
 
+/**
+ * The handshake connected but never agreed a match — a stale/incompatible
+ * peer app, or nobody answered in time. Resolves only once the player
+ * acknowledges it: main.ts's menu loop re-renders the moment this session
+ * function returns, so returning immediately here would wipe the
+ * explanation off the screen before it could be read.
+ */
+function renderRefused(root: HTMLElement, message: string): Promise<void> {
+  root.innerHTML = "";
+  const card = document.createElement("section");
+  card.className = "card invite-card";
+  card.setAttribute("data-connect-failed", "");
+
+  const banner = document.createElement("p");
+  banner.className = "error";
+  banner.textContent = message;
+
+  const leave = document.createElement("button");
+  leave.type = "button";
+  leave.textContent = "Leave";
+  leave.className = "btn btn--ghost menu-btn";
+
+  card.append(banner, leave);
+  root.append(card);
+  return new Promise((resolve) => {
+    leave.addEventListener("click", () => resolve());
+  });
+}
+
 async function playMatchLoop(root: HTMLElement, peer: PeerHandle): Promise<void> {
-  const human = peer.youAre;
+  // Host is always player 0 (Mark.X); guest is always player 1 (Mark.O) —
+  // game-kit/docs/DESIGN.md "Host is P1". Derived from the peer's own role
+  // rather than sent over the wire: both sides already agree on it the
+  // instant the connection is established as host or guest.
+  const human = peer.role === "host" ? Mark.X : Mark.O;
   const screen = createMatchScreen({
     root,
     initialBudget: BUDGET,
@@ -209,7 +348,7 @@ async function playOnePvpTurn(
 
   screen.renderBoard(game.board, undefined, { mine: human });
 
-  // Listen before waiting — see turn-inbox.ts.
+  // Listen before waiting — see game-kit's turn-inbox.ts doc comment.
   const inbox = openTurnInbox(peer, turn);
   try {
     const myMove = await askMove({
@@ -223,8 +362,15 @@ async function playOnePvpTurn(
       onOpponentBid: (fn) => inbox.onCommit(fn),
     });
 
+    // The kit's commit carries an optional `public` payload alongside the
+    // hash — BTTT uses it to expose the target CELL in cleartext at commit
+    // time (only the bid stays hidden until reveal), matching this game's
+    // pre-migration wire shape. `hash` covers [bid, cell] together so a
+    // reveal can't swap in a different cell than the one already committed
+    // in the clear.
     const salt = newSalt();
-    peer.send({ kind: "commit", turn, commit: await commitFor(myMove, salt), cell: myMove.cell });
+    const hash = await commitPayload([myMove.bid, myMove.cell], salt);
+    peer.send({ kind: "commit", turn, hash, public: myMove.cell });
 
     screen.bidPanel.setWaiting("Bid committed. Waiting for your friend…");
     const oppCommit = await orPeerGone(inbox, inbox.commit(), "Your friend stopped responding.");
@@ -232,8 +378,12 @@ async function playOnePvpTurn(
     peer.send({ kind: "reveal", turn, bid: myMove.bid, salt });
     const oppReveal = await orPeerGone(inbox, inbox.reveal(), "Your friend stopped responding.");
 
-    const oppMove: Move = { bid: oppReveal.bid, cell: oppCommit.cell };
-    if (!(await verifyReveal(oppCommit.commit, oppMove, oppReveal.salt))) {
+    if (typeof oppCommit.public !== "number") {
+      throw new PeerGoneError("Your friend's committed move was invalid.");
+    }
+    const oppMove: Move = { bid: oppReveal.bid, cell: oppCommit.public };
+    const verified = await verifyPayload(oppCommit.hash, [oppReveal.bid, oppMove.cell], oppReveal.salt);
+    if (!verified) {
       throw new PeerGoneError("Your friend's revealed bid did not match their commitment.");
     }
 
@@ -241,7 +391,7 @@ async function playOnePvpTurn(
     const oMove: Move = human === Mark.X ? oppMove : myMove;
     const budgetsBefore: [number, number] = [game.budget[0], game.budget[1]];
 
-    const { game: next, result } = resolveTurn(game, xMove, oMove);
+    const { game: next, result } = resolveTurnSafely(game, xMove, oMove);
     Object.assign(game, next);
     const outcome = boardOutcome(game.board);
     // Re-render with the post-move state so the winning mark is visible; at
@@ -262,13 +412,28 @@ async function playOnePvpTurn(
   }
 }
 
+// resolveTurn throws on an out-of-range/occupied cell or an over-budget bid.
+// A well-behaved client's own UI never produces one, but a hostile or buggy
+// peer's revealed move could (verifyPayload only proves the reveal matches
+// the earlier commitment, not that the committed move was itself legal).
+// Treat that like any other protocol violation: abandon rather than guess.
+function resolveTurnSafely(game: Game, xMove: Move, oMove: Move): { game: Game; result: ReturnType<typeof resolveTurn>["result"] } {
+  try {
+    return resolveTurn(game, xMove, oMove);
+  } catch (e) {
+    throw new PeerGoneError(
+      e instanceof Error ? `Your friend's move was invalid: ${e.message}` : "Your friend's move was invalid.",
+    );
+  }
+}
+
 /**
  * Await `p`, but give up if the peer goes away or simply stops talking.
  * Rejecting with PeerGoneError abandons the match; it never substitutes a
  * move, so the two boards cannot diverge.
  */
 function orPeerGone<T>(inbox: ReturnType<typeof openTurnInbox>, p: Promise<T>, message: string): Promise<T> {
-  const gone = inbox.closed().then(() => {
+  const gone = inbox.closed().then((): T => {
     throw new PeerGoneError("Your friend left the room.");
   });
   let timer: ReturnType<typeof setTimeout>;

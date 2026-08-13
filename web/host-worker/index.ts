@@ -3,10 +3,11 @@
 //
 // Serves the static `dist/` build from the repo (uploaded as a static asset)
 // and rewrites the SPA fallback so `#room=<code>` share-link navigation
-// works without any server route. This is the second Cloudflare worker in
-// the project (alongside signaling-worker); per `[[cloudflare-not-firebase-
-// hosting]]` we deliberately don't extend the legacy Firebase
-// `deploy.yml`.
+// works without any server route. It is the only Cloudflare worker this
+// repo's source manages — vs-Friend's WebRTC signaling now runs against the
+// shared `sneat-games/webrtc-relay` deployment (webrtc.sneat.games) instead
+// of a worker of this repo's own; per `[[cloudflare-not-firebase-hosting]]`
+// we deliberately don't extend the legacy Firebase `deploy.yml`.
 
 interface Env {
   ASSETS: Fetcher; // Cloudflare Pages/Workers static-assets binding
