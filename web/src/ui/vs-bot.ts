@@ -15,7 +15,7 @@ import { botMove } from "../bot/bot";
 import { askMove, MoveAbortedError } from "./ask-move";
 import { createConfirmButton } from "./confirm-button";
 import { createMatchScreen, renderMatchOver, type MatchScreen } from "./match-screen";
-import { VS_BOT_LATE_BID_MS } from "./turn-clock";
+import { VS_BOT_LATE_BID_MS } from "@sneat/game-kit";
 import { winningLine } from "./win-line";
 
 const BUDGET = 100;

@@ -20,7 +20,7 @@
 import { Board, Mark, Move } from "../engine/btttplay";
 import { botMove } from "../bot/bot";
 import type { BidPanel } from "./bid-panel";
-import { LATE_BID_DEFAULT, LATE_BID_MS, STALL_MS, stallBid } from "./turn-clock";
+import { LATE_BID_DEFAULT, LATE_BID_MS, STALL_MS, stallBid } from "@sneat/game-kit";
 
 /** Thrown when a turn is interrupted — currently only by "New game". */
 export class MoveAbortedError extends Error {

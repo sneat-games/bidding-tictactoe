@@ -10,7 +10,7 @@
 // let it run out, so an auto-bid is never a surprise.
 
 import { createBidInput, type BidInput } from "./bid-input";
-import { startCountdown, type Countdown } from "./turn-clock";
+import { startCountdown, type Countdown } from "@sneat/game-kit";
 
 export interface ClockOptions {
   ms: number;
