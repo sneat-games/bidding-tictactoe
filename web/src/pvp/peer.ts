@@ -12,13 +12,16 @@
 //   3. Each peer verifies the other's reveal against the stored commit hash,
 //      then runs `resolveTurn` locally with both revealed moves.
 //
-// `roomId` is a uuid v4 (see room.ts). It acts as an unguessable capability:
-// only someone holding the room link can connect.
+// `roomId` is a 6-char unambiguous code (see room.ts). It is namespaced on
+// the shared relay by `GAME_ID` so two games cannot collide on the same
+// code; the relay reserves each {gameId, roomId} pair before connection
+// setup.
 //
 // All messages over the DataChannel are JSON of type WireMessage.
 
 import type { Move } from "../engine/btttplay";
 import { Mark } from "../engine/btttplay";
+import { SIGNALING_BASE, GAME_ID } from "./room";
 
 export type WireMessage =
   | { kind: "hello"; youAre: Mark; roomId: string }
@@ -26,6 +29,7 @@ export type WireMessage =
   | { kind: "reveal"; turn: number; bid: number; salt: string }
   | { kind: "rematch-request" }
   | { kind: "rematch-accept" }
+  | { kind: "sync"; board: string; budget: [number, number]; tieToX: boolean; turn: number }
   | { kind: "leave" };
 
 export interface PeerHandle {
@@ -34,13 +38,21 @@ export interface PeerHandle {
   readonly dataChannel: RTCDataChannel;
   send(msg: WireMessage): void;
   close(): void;
+  /** Register a listener for incoming messages. The handle BUFFERS messages
+   *  that arrive before any listener is registered, so callers don't miss
+   *  commits/reveals that arrive between `peer.send(...)` and
+   *  `waitForCommit(...)`; they're delivered to the first listener that
+   *  matches. */
   onMessage(cb: (msg: WireMessage) => void): void;
+  /** Remove a previously-registered listener. */
+  offMessage(cb: (msg: WireMessage) => void): void;
   onClose(cb: () => void): void;
+  offClose(cb: () => void): void;
 }
 
-const SIGNALING_BASE = ((import.meta as { env?: { SIGNALING_BASE?: string } }).env?.SIGNALING_BASE) ??
+const SIGNALING_BASE_LOCAL = ((import.meta as { env?: { SIGNALING_BASE?: string } }).env?.SIGNALING_BASE) ??
   (typeof window !== "undefined" && window.location?.hostname?.endsWith(".sneat.games")
-    ? "https://signal.bidding-tictactoe.sneat.games"
+    ? "https://webrtc.sneat.games"
     : "http://localhost:8787");
 
 /** Signaling relay client. Only used during connection setup; once the
@@ -50,16 +62,19 @@ interface SignalingClient {
   roomId: string;
   post: (type: "offer" | "answer" | "ice", body: string) => Promise<void>;
   poll: (type: "offer" | "answer" | "ice") => Promise<string | null>;
+  teardown: () => Promise<void>;
 }
 
 function signalingClient(roomId: string, host: boolean): SignalingClient {
   const role = host ? "host" : "guest";
+  const pollRole = host ? "guest" : "host";
+  const base = SIGNALING_BASE ?? SIGNALING_BASE_LOCAL;
   return {
     host,
     roomId,
     async post(type, body) {
       const res = await fetch(
-        `${SIGNALING_BASE}/signal/${encodeURIComponent(roomId)}/${role}/${type}`,
+        `${base}/signal/${encodeURIComponent(GAME_ID)}/${encodeURIComponent(roomId)}/${role}/${type}`,
         {
           method: "POST",
           headers: { "content-type": "text/plain" },
@@ -70,11 +85,18 @@ function signalingClient(roomId: string, host: boolean): SignalingClient {
     },
     async poll(type) {
       const res = await fetch(
-        `${SIGNALING_BASE}/signal/${encodeURIComponent(roomId)}/${role}/${type}`,
+        `${base}/signal/${encodeURIComponent(GAME_ID)}/${encodeURIComponent(roomId)}/${pollRole}/${type}`,
       );
       if (res.status === 404) return null;
       if (!res.ok) throw new Error(`signing poll ${type}: ${res.status}`);
       return await res.text();
+    },
+    async teardown() {
+      const res = await fetch(
+        `${base}/signal/${encodeURIComponent(GAME_ID)}/${encodeURIComponent(roomId)}`,
+        { method: "DELETE" },
+      );
+      if (!res.ok && res.status !== 404) throw new Error(`teardown: ${res.status}`);
     },
   };
 }
@@ -181,16 +203,22 @@ async function waitFor(
 }
 
 async function drainIce(sig: SignalingClient, pc: RTCPeerConnection, type: "ice"): Promise<void> {
+  const seen = new Set<string>();
   const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
     const v = await sig.poll(type);
     if (v !== null && v.length > 0) {
-      try {
-        const candidate = JSON.parse(v) as RTCIceCandidateInit;
-        await pc.addIceCandidate(candidate);
-      } catch (e) {
-        // Late candidates may arrive after close; safe to ignore.
-        console.debug("[pvp] addIceCandidate ignored", e);
+      // The relay stores ICE candidates as newline-separated JSON strings.
+      // Split, deduplicate, and add each one.
+      for (const line of v.split("\n")) {
+        if (line.length === 0 || seen.has(line)) continue;
+        seen.add(line);
+        try {
+          const candidate = JSON.parse(line) as RTCIceCandidateInit;
+          await pc.addIceCandidate(candidate);
+        } catch (e) {
+          console.debug("[pvp] addIceCandidate ignored", e);
+        }
       }
     } else {
       await sleep(200);
@@ -210,10 +238,18 @@ function makeHandle(
 ): PeerHandle {
   const msgCbs = new Set<(m: WireMessage) => void>();
   const closeCbs = new Set<() => void>();
+  // Buffer messages that arrive before any listener is registered so
+  // callers don't miss commits/reveals that land between `peer.send()`
+  // and `waitForCommit()`/`waitForReveal()`.
+  const msgBuffer: WireMessage[] = [];
   dc.addEventListener("message", (e) => {
     try {
       const msg = JSON.parse(e.data) as WireMessage;
-      for (const cb of msgCbs) cb(msg);
+      if (msgCbs.size === 0) {
+        msgBuffer.push(msg);
+      } else {
+        for (const cb of msgCbs) cb(msg);
+      }
     } catch (err) {
       console.warn("[pvp] dropped malformed message", err);
     }
@@ -236,8 +272,19 @@ function makeHandle(
       try { dc.close(); } catch { /* noop */ }
       try { pc.close(); } catch { /* noop */ }
     },
-    onMessage(cb) { msgCbs.add(cb); },
+    onMessage(cb) {
+      msgCbs.add(cb);
+      // Flush any buffered messages to the new listener.
+      while (msgBuffer.length > 0) {
+        const msg = msgBuffer.shift()!;
+        cb(msg);
+      }
+    },
+    offMessage(cb) {
+      msgCbs.delete(cb);
+    },
     onClose(cb) { closeCbs.add(cb); },
+    offClose(cb) { closeCbs.delete(cb); },
   };
 }
 

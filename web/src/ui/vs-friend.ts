@@ -5,14 +5,17 @@
 // Once the DataChannel is open, both peers exchange hidden-bid moves using
 // the commit-reveal protocol in peer.ts. After a win/draw the peers can
 // rematch in the same room without navigating back through the menu.
-// A right-side game log shows each turn's winning (green) and losing (red)
-// bids plus running budget bars.
+// If either peer's page reloads, the WebRTC channel is re-established
+// through the relay and the game state is synced over a "sync" message
+// so play can continue.
 
-import { Mark, Outcome, newGame, resolveTurn, boardOutcome, markString, outcomeString, Game, Move } from "../engine/btttplay";
+import { Mark, Outcome, newGame, resolveTurn, boardOutcome, markString, outcomeString, Game, Move, boardString } from "../engine/btttplay";
 import { createBidInput } from "./bid-input";
-import { reserveRoomId } from "../pvp/room";
+import { reserveRoomId, shareLinkFor } from "../pvp/room";
 import { hostPeer, guestPeer, WireMessage, PeerHandle, commitFor, verifyReveal, newSalt } from "../pvp/peer";
 import { createGameLog } from "./game-log";
+import { createBudgetDisplay } from "./budget-display";
+import { saveState, clearAll, stateFromGame, loadState, restoreGame } from "../pvp/game-store";
 import * as cg from "../crazygames/sdk";
 
 const BUDGET = 100;
@@ -28,27 +31,27 @@ export async function runVsFriend(
 ): Promise<void> {
   let peer: PeerHandle | null = null;
   let roomId = opts.roomId ?? "";
+  const as = opts.as;
 
   try {
-    if (opts.as === "host") {
-      // Reserve a fresh unique room id.
+    if (as === "host") {
       roomId = await reserveRoomId();
       cg.updateRoom({ roomId, isJoinable: true, inviteParams: { roomId } });
       const cgShareLink = cg.inviteLink({ roomId });
-      const { peer: p, inviteLinkUrl } = await hostPeer({ roomId });
-      peer = p;
-      renderInvite(root, {
+      const shareLink = shareLinkFor(
+        typeof window !== "undefined" ? `${window.location.origin}${window.location.pathname}` : "",
         roomId,
-        shareLink: inviteLinkUrl(typeof window !== "undefined" ? `${window.location.origin}${window.location.pathname}` : ""),
-        cgShareLink,
-      });
+      );
+      renderInvite(root, { roomId, shareLink, cgShareLink });
+      const { peer: p } = await hostPeer({ roomId });
+      peer = p;
     } else {
       if (!roomId) throw new Error("missing room id");
       cg.updateRoom({ roomId, isJoinable: true, inviteParams: { roomId } });
-      peer = await guestPeer({ roomId });
       renderJoined(root, roomId);
+      peer = await guestPeer({ roomId });
     }
-    await playMatchLoop(root, peer!);
+    await playMatchLoop(root, peer!, roomId, as);
   } finally {
     peer?.close();
     cg.leftRoom();
@@ -88,12 +91,133 @@ function renderJoined(root: HTMLElement, roomId: string) {
   root.append(banner);
 }
 
-async function playMatchLoop(root: HTMLElement, peer: PeerHandle): Promise<void> {
-  while (true) {
-    let game = newGame(BUDGET);
-    const human = peer.youAre;
+function renderReconnecting(root: HTMLElement) {
+  root.innerHTML = "";
+  const overlay = document.createElement("div");
+  overlay.className = "reconnecting";
+  const spinner = document.createElement("div");
+  spinner.className = "reconnecting__spinner";
+  const text = document.createElement("p");
+  text.className = "reconnecting__text";
+  text.textContent = "Reconnecting…";
+  const sub = document.createElement("p");
+  sub.className = "reconnecting__sub";
+  sub.textContent = "Re-establishing WebRTC channel";
+  overlay.append(spinner, text, sub);
+  root.append(overlay);
+}
 
-    // Two-column layout: board area (left) + game log (right).
+function renderDisconnected(root: HTMLElement): Promise<"reconnect" | "leave"> {
+  root.innerHTML = "";
+  const overlay = document.createElement("div");
+  overlay.className = "disconnected";
+  const text = document.createElement("p");
+  text.className = "disconnected__text";
+  text.textContent = "Friend disconnected";
+  const sub = document.createElement("p");
+  sub.className = "disconnected__sub";
+  sub.textContent = "Your friend left the game. You can wait for them to reconnect or go back to the menu.";
+  const reconnect = document.createElement("button");
+  reconnect.type = "button";
+  reconnect.textContent = "Wait & Reconnect";
+  reconnect.className = "rematch";
+  const leave = document.createElement("button");
+  leave.type = "button";
+  leave.textContent = "Back to menu";
+  leave.className = "menu-btn";
+  overlay.append(text, sub, reconnect, leave);
+  root.append(overlay);
+  return new Promise((resolve) => {
+    reconnect.addEventListener("click", () => resolve("reconnect"));
+    leave.addEventListener("click", () => resolve("leave"));
+  });
+}
+
+/** Re-establish the WebRTC connection using the same roomId. Tears down
+ *  stale SDP/ICE on the relay first, then re-negotiates. */
+async function reconnectPeer(roomId: string, as: "host" | "guest"): Promise<PeerHandle> {
+  // Teardown the relay to clear stale offer/answer/ICE from the previous
+  // connection so the fresh negotiation doesn't pick up a stale SDP.
+  const base = (typeof window !== "undefined" && window.location?.hostname?.endsWith(".sneat.games"))
+    ? "https://webrtc.sneat.games"
+    : "http://localhost:8787";
+  try {
+    await fetch(`${base}/signal/bttt/${encodeURIComponent(roomId)}`, { method: "DELETE" });
+  } catch {
+    // non-fatal — the relay may have already expired the entries
+  }
+  if (as === "host") {
+    const { peer } = await hostPeer({ roomId });
+    return peer;
+  } else {
+    return await guestPeer({ roomId });
+  }
+}
+
+/** After reconnection, exchange game state so both peers agree on the
+ *  board/budget/turn. The peer with the higher turn count wins (it may
+ *  have completed one more turn before the disconnect). */
+async function syncGameState(
+  peer: PeerHandle,
+  game: Game,
+  turn: number,
+  human: Mark,
+): Promise<{ game: Game; turn: number }> {
+  // Send our state to the other peer.
+  peer.send({
+    kind: "sync",
+    board: boardString(game.board),
+    budget: [...game.budget] as [number, number],
+    tieToX: game.tieToX,
+    turn,
+  });
+  // Wait for their state.
+  const theirState = await new Promise<{ board: string; budget: [number, number]; tieToX: boolean; turn: number }>((resolve) => {
+    const cb = (msg: WireMessage) => {
+      if (msg.kind === "sync") {
+        peer.offMessage(cb);
+        resolve({ board: msg.board, budget: msg.budget, tieToX: msg.tieToX, turn: msg.turn });
+      }
+    };
+    peer.onMessage(cb);
+  });
+  // Reconcile: use the state with the higher turn count.
+  if (theirState.turn > turn) {
+    const restored = await restoreGame({ mode: "vs-friend", board: theirState.board, budget: theirState.budget, tieToX: theirState.tieToX, turn: theirState.turn, human: human === Mark.X ? "X" : "O", savedAt: Date.now() });
+    if (restored) return { game: restored, turn: theirState.turn };
+  }
+  return { game, turn };
+}
+
+async function playMatchLoop(
+  root: HTMLElement,
+  initialPeer: PeerHandle,
+  roomId: string,
+  as: "host" | "guest",
+): Promise<void> {
+  let peer = initialPeer;
+  // Try restoring a saved game so a page reload mid-match resumes it.
+  const saved = await loadState();
+  let game: Game;
+  let turn: number;
+  let human = peer.youAre;
+  if (saved && saved.mode === "vs-friend") {
+    const restored = await restoreGame(saved);
+    if (restored) {
+      game = restored;
+      turn = saved.turn;
+      human = saved.human === "X" ? Mark.X : Mark.O;
+    } else {
+      game = newGame(BUDGET);
+      turn = 0;
+    }
+  } else {
+    game = newGame(BUDGET);
+    turn = 0;
+  }
+
+  while (true) {
+    // Set up the two-column layout.
     root.innerHTML = "";
     const screen = document.createElement("div");
     screen.className = "game-screen";
@@ -106,35 +230,91 @@ async function playMatchLoop(root: HTMLElement, peer: PeerHandle): Promise<void>
       xLabel: peer.youAre === Mark.X ? "You (X)" : "Friend (X)",
       oLabel: peer.youAre === Mark.O ? "You (O)" : "Friend (O)",
     });
+    const budgetDisplay = createBudgetDisplay({
+      xLabel: peer.youAre === Mark.X ? "You" : "Friend",
+      oLabel: peer.youAre === Mark.O ? "You" : "Friend",
+      initialBudget: BUDGET,
+    });
+    budgetDisplay.update(game.budget);
     logArea.append(log.el);
     screen.append(boardArea, logArea);
     root.append(screen);
 
-    const outcome = await playTurns(boardArea, peer, game, human, log);
-    const again = await renderFinal(boardArea, outcome, game);
-    // Coordinate rematch with the other peer.
-    let otherWantsRematch = false;
-    const rematchPromise = new Promise<boolean>((resolve) => {
-      const cb = (msg: WireMessage) => {
-        if (msg.kind === "rematch-request") {
-          otherWantsRematch = true;
-          peer.send({ kind: "rematch-accept" });
-          resolve(true);
-        } else if (msg.kind === "rematch-accept") {
-          resolve(true);
+    if (boardOutcome(game.board) === Outcome.Ongoing) {
+      let outcome: Outcome;
+      try {
+        outcome = await playTurns(boardArea, peer, game, human, turn, log, budgetDisplay, roomId, as);
+      } catch (e) {
+        if (e instanceof PeerDisconnectedError) {
+          const action = await renderDisconnected(boardArea);
+          if (action === "reconnect") {
+            renderReconnecting(root);
+            peer = await reconnectPeer(roomId, as);
+            human = peer.youAre;
+            const synced = await syncGameState(peer, game, turn, human);
+            game = synced.game;
+            turn = synced.turn;
+            continue;
+          } else {
+            clearAll();
+            return;
+          }
         }
-      };
-      peer.onMessage(cb);
-    });
-    if (again) {
-      peer.send({ kind: "rematch-request" });
-      await rematchPromise;
+        throw e;
+      }
+      clearAll();
+      const again = await renderFinal(boardArea, outcome, game);
+      // Coordinate rematch.
+      const rematchPromise = new Promise<boolean>((resolve) => {
+        const cb = (msg: WireMessage) => {
+          if (msg.kind === "rematch-request") {
+            peer.send({ kind: "rematch-accept" });
+            resolve(true);
+          } else if (msg.kind === "rematch-accept") {
+            resolve(true);
+          }
+        };
+        peer.onMessage(cb);
+      });
+      if (again) {
+        peer.send({ kind: "rematch-request" });
+        await rematchPromise;
+        game = newGame(BUDGET);
+        turn = 0;
+      } else {
+        peer.send({ kind: "leave" });
+        return;
+      }
     } else {
-      peer.send({ kind: "leave" });
-      return;
+      // Saved game was already terminal; start fresh.
+      game = newGame(BUDGET);
+      turn = 0;
     }
-    void otherWantsRematch;
   }
+}
+
+class PeerDisconnectedError extends Error {
+  constructor() {
+    super("peer disconnected");
+    this.name = "PeerDisconnectedError";
+  }
+}
+
+/** Race a wait-for-message promise against the peer's close event. If the
+ *  DataChannel closes first (peer closed tab, network drop), throw
+ *  PeerDisconnectedError so the caller can show a reconnect/disconnect UI. */
+function raceDisconnect<T>(peer: PeerHandle, p: Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const onClose = () => reject(new PeerDisconnectedError());
+    peer.onClose(onClose);
+    p.then((v) => {
+      peer.offClose(onClose);
+      resolve(v);
+    }).catch((e) => {
+      peer.offClose(onClose);
+      reject(e);
+    });
+  });
 }
 
 async function playTurns(
@@ -142,12 +322,17 @@ async function playTurns(
   peer: PeerHandle,
   game: Game,
   human: Mark,
+  startTurn: number,
   log: ReturnType<typeof createGameLog>,
+  budgetDisplay: ReturnType<typeof createBudgetDisplay>,
+  roomId: string,
+  as: "host" | "guest",
 ): Promise<Outcome> {
-  let turn = 0;
+  let turn = startTurn;
   while (boardOutcome(game.board) === Outcome.Ongoing) {
-    await playOnePvpTurn(root, peer, game, turn, human, log);
+    await playOnePvpTurn(root, peer, game, turn, human, log, budgetDisplay);
     turn++;
+    saveState(stateFromGame("vs-friend", game, turn, human, { roomId, as }));
   }
   return boardOutcome(game.board);
 }
@@ -159,18 +344,22 @@ async function playOnePvpTurn(
   turn: number,
   human: Mark,
   log: ReturnType<typeof createGameLog>,
+  budgetDisplay: ReturnType<typeof createBudgetDisplay>,
 ): Promise<void> {
   renderBoard(root, game, human);
+  root.prepend(budgetDisplay.el);
+  budgetDisplay.update(game.budget);
   const humanMove = await askHuman(root, game, human);
   const salt = newSalt();
   const commit = await commitFor(humanMove, salt);
   peer.send({ kind: "commit", turn, commit, cell: humanMove.cell });
 
-  // Wait for opponent commit + reveal.
-  const pending = await waitForCommit(peer, turn);
-  // Send reveal.
+  // Race the opponent's commit/reveal against a disconnect — if the
+  // friend closes their tab, the DataChannel closes and we bail out
+  // immediately instead of hanging forever.
+  const pending = await raceDisconnect(peer, waitForCommit(peer, turn));
   peer.send({ kind: "reveal", turn, bid: humanMove.bid, salt });
-  const oppReveal = await waitForReveal(peer, turn);
+  const oppReveal = await raceDisconnect(peer, waitForReveal(peer, turn));
   const verified = await verifyReveal(pending.commit, { bid: oppReveal.bid, cell: pending.cell }, oppReveal.salt);
   if (!verified) throw new Error("opponent reveal failed verification");
 
@@ -179,9 +368,9 @@ async function playOnePvpTurn(
   const budgetsBefore: [number, number] = [game.budget[0], game.budget[1]];
   const { game: next, result } = resolveTurn(game, xMove, oMove);
   Object.assign(game, next);
-  // Re-render the board with the post-move state so the winning mark
-  // is visible (and the prompt/submit UI is cleared).
   renderBoard(root, game, human);
+  root.prepend(budgetDisplay.el);
+  budgetDisplay.update(game.budget);
   renderTurnResult(root, result, game, human);
   log.append({
     turn,
@@ -203,12 +392,14 @@ function renderBoard(root: HTMLElement, game: Game, human: Mark) {
     cell.className = "board__cell";
     cell.setAttribute("data-cell", String(i));
     cell.textContent = markString(game.board[i]);
+    if (game.board[i] === Mark.X) cell.classList.add("board__cell--x");
+    else if (game.board[i] === Mark.O) cell.classList.add("board__cell--o");
     if (game.board[i] !== 0 /* Empty */) cell.disabled = true;
     board.appendChild(cell);
   }
   const status = document.createElement("p");
   status.className = "status";
-  status.textContent = `You are ${markString(human)}. Budgets — You: ${game.budget[human === Mark.X ? 0 : 1]}, Friend: ${game.budget[human === Mark.X ? 1 : 0]}.`;
+  status.textContent = `You are ${markString(human)}.`;
   root.append(board, status);
 }
 
@@ -224,8 +415,11 @@ async function askHuman(root: HTMLElement, game: Game, human: Mark): Promise<{ b
     cells.forEach((c) => {
       if (c.disabled) return;
       c.addEventListener("click", () => {
-        const cell = parseInt(c.dataset.cell ?? "", 10);
-        resolve({ bid: bid.value(), cell });
+        cells.forEach((x) => x.classList.remove("selected"));
+        c.classList.add("selected");
+        c.textContent = markString(human);
+        c.classList.add("pending");
+        resolve({ bid: bid.value(), cell: parseInt(c.dataset.cell ?? "", 10) });
       });
     });
   });
@@ -235,6 +429,7 @@ function waitForCommit(peer: PeerHandle, turn: number): Promise<PendingCommit> {
   return new Promise((resolve) => {
     const cb = (msg: WireMessage) => {
       if (msg.kind === "commit" && msg.turn === turn) {
+        peer.offMessage(cb);
         resolve({ commit: msg.commit, cell: msg.cell });
       }
     };
@@ -246,6 +441,7 @@ function waitForReveal(peer: PeerHandle, turn: number): Promise<{ bid: number; s
   return new Promise((resolve) => {
     const cb = (msg: WireMessage) => {
       if (msg.kind === "reveal" && msg.turn === turn) {
+        peer.offMessage(cb);
         resolve({ bid: msg.bid, salt: msg.salt });
       }
     };

@@ -2,10 +2,10 @@
 
 Client-only Astro + TypeScript web build of Bidding Tic-Tac-Toe, packaged
 for both CrazyGames and `bidding-tictactoe.sneat.games`. No server-side
-game state: vs-bot plays locally, vs-friend uses a tiny Cloudflare Worker
-signaling relay (no DB, no auth, no game state) plus WebRTC DataChannel with
-a commit-reveal protocol so neither peer sees the other's bid before
-commitment.
+game state: vs-bot plays locally, vs-friend uses the **shared
+`sneat-games/webrtc-relay`** Cloudflare Worker (no DB, no auth, no game
+state) plus WebRTC DataChannel with a commit-reveal protocol so neither
+peer sees the other's bid before commitment.
 
 ## Local development
 
@@ -13,37 +13,36 @@ commitment.
 npm install
 npm run dev          # http://localhost:4321 — SDK runs in `local` env
 npm run test         # vitest (engine, bot, room, bid-input)
-npm run typecheck    # astro check + tsc + worker tscconfigs
+npm run typecheck    # astro check + tsc + host-worker tscconfig
 npm run lint         # eslint flat config
 npm run build        # static dist/ → zippable for CrazyGames
 ```
 
-To run the signaling relay locally:
-
-```sh
-npm run worker:dev   # http://localhost:8787 — KV-backed relay
-```
+To run the shared signaling relay locally, clone `sneat-games/webrtc-relay`
+side-by-side and `npm run dev` there — it listens on `http://localhost:8787`
+by default, which the client picks up automatically when not on
+`*.sneat.games`. See `sneat-games/webrtc-relay/README.md` for relay routes
+and deploy.
 
 ## Deploy
 
 | Surface                | Worker                                          | Domain                                   |
 |------------------------|-------------------------------------------------|------------------------------------------|
 | Static game            | `web/host-worker/`                              | `bidding-tictactoe.sneat.games`          |
-| WebRTC signaling relay | `web/signaling-worker/`                         | `signal.bidding-tictactoe.sneat.games`  |
+| WebRTC signaling relay | `sneat-games/webrtc-relay` (shared across games)  | `webrtc.sneat.games`                     |
 | CrazyGames build       | `web/dist/` zip uploaded via Developer Portal   | `crazygames.com/game/bidding-tic-tac-toe`|
 
-Deploy workers:
+Deploy the host worker:
 
 ```sh
 npm run host:deploy     # bidding-tictactoe.sneat.games
-npm run worker:deploy   # signal.bidding-tictactoe.sneat.games
 ```
 
-Before first deploy:
-- Create a KV namespace `SIGNAL` and put its id + preview_id into
-  `web/signaling-worker/wrangler.jsonc` (`binding: "SIGNAL"`).
-- Verify DNS for `bidding-tictactoe.sneat.games` and
-  `signal.bidding-tictactoe.sneat.games` point at Cloudflare.
+The WebRTC signaling relay is shared across all Sneat turn-based WebRTC
+games and lives in its own repo, `sneat-games/webrtc-relay`. This repo
+pins `GAME_ID = "bttt"` (`web/src/pvp/room.ts`) so its 6-char room codes
+are namespaced on the shared relay and never collide with another game's.
+See `sneat-games/webrtc-relay/README.md` for relay routes and deploy.
 
 ## Modes
 

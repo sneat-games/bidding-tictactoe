@@ -1,15 +1,17 @@
 // Game log panel — a right-side scrollable list of past turns with progress
-// bars showing the size of each bid relative to the initial budget.
+// bars showing the size of each bid relative to the max budget across both
+// players.
 //
-// Bar fill = bid / initialBudget. The winning bid bar is green; the losing
-// bid bar is red. A tie-break is marked with a small badge. Running budget
-// bars for both sides appear at the top of the log and update after each
-// turn.
+// Budget bars live ABOVE the board (see budget-display.ts), not in the log.
+// The log shows only turn entries: who won, which cell, bid bars (green win,
+// red loss).
 //
+// X/O marks are coloured (purple X, amber O) to match the budget bars.
 // The log is created once per match and `clear()`-ed on rematch.
 
 import type { Move, TurnResult } from "../engine/btttplay";
 import { markString } from "../engine/btttplay";
+import { saveLogEntries, loadLogEntries, clearLogEntries } from "../pvp/game-store";
 
 export interface LogEntry {
   turn: number;
@@ -31,6 +33,7 @@ export function createGameLog(opts: {
   xLabel: string;
   oLabel: string;
 }): GameLog {
+  void opts; // labels kept for potential future use in log headers
   const el = document.createElement("aside");
   el.className = "game-log";
   el.setAttribute("aria-label", "Game log");
@@ -40,55 +43,48 @@ export function createGameLog(opts: {
   header.textContent = "Game log";
   header.className = "game-log__title";
 
-  const budgets = document.createElement("div");
-  budgets.className = "game-log__budgets";
-  budgets.setAttribute("data-budgets", "");
-
   const entries = document.createElement("div");
   entries.className = "game-log__entries";
   entries.setAttribute("data-entries", "");
 
-  el.append(header, budgets, entries);
+  el.append(header, entries);
 
-  function renderBudgets(b: [number, number]) {
-    budgets.innerHTML = "";
-    budgets.append(
-      budgetBar(opts.xLabel, b[0], opts.initialBudget, "x"),
-      budgetBar(opts.oLabel, b[1], opts.initialBudget, "o"),
-    );
+  const allEntries: LogEntry[] = [];
+  let restoring = false;
+
+  function renderAll() {
+    entries.innerHTML = "";
+    for (let i = allEntries.length - 1; i >= 0; i--) {
+      entries.append(renderEntry(allEntries[i]));
+    }
   }
 
   function append(entry: LogEntry) {
-    renderBudgets(entry.budgetsAfter);
+    allEntries.push(entry);
+    if (!restoring) {
+      void saveLogEntries(allEntries);
+    }
     entries.prepend(renderEntry(entry));
   }
 
-  function clear() {
+  async function clear() {
+    allEntries.length = 0;
     entries.innerHTML = "";
-    renderBudgets([opts.initialBudget, opts.initialBudget]);
+    await clearLogEntries();
   }
 
-  // Initial budget render.
-  renderBudgets([opts.initialBudget, opts.initialBudget]);
+  // Async: load saved entries from IndexedDB and re-render so a page
+  // reload restores the full log.
+  restoring = true;
+  void loadLogEntries().then((saved) => {
+    if (saved.length > 0) {
+      allEntries.push(...saved);
+      renderAll();
+    }
+    restoring = false;
+  });
 
   return { el, append, clear };
-}
-
-function budgetBar(label: string, value: number, max: number, cls: string): HTMLElement {
-  const row = document.createElement("div");
-  row.className = `game-log__budget game-log__budget--${cls}`;
-  const lbl = document.createElement("span");
-  lbl.className = "game-log__budget-label";
-  lbl.textContent = `${label}: ${value}/${max}`;
-  const track = document.createElement("div");
-  track.className = "game-log__bar-track";
-  const fill = document.createElement("div");
-  fill.className = `game-log__bar-fill game-log__bar-fill--${cls}`;
-  const pct = max > 0 ? Math.max(0, Math.min(1, value / max)) : 0;
-  fill.style.width = `${(pct * 100).toFixed(1)}%`;
-  track.append(fill);
-  row.append(lbl, track);
-  return row;
 }
 
 function renderEntry(entry: LogEntry): HTMLElement {
@@ -99,33 +95,29 @@ function renderEntry(entry: LogEntry): HTMLElement {
   const head = document.createElement("div");
   head.className = "game-log__entry-head";
   const tieBadge = result.tieBreak ? " <span class=\"game-log__tie\">tie</span>" : "";
-  head.innerHTML = `<span class="game-log__turn">T${turn + 1}</span> ${markString(result.winner)} took cell ${result.cell}${tieBadge}`;
+  const winnerMark = markString(result.winner);
+  head.innerHTML = `<span class="game-log__turn">T${turn + 1}</span> <span class="game-log__mark game-log__mark--${winnerMark.toLowerCase()}">${winnerMark}</span> took cell ${result.cell}${tieBadge}`;
   card.append(head);
 
-  // Winning bid bar (green) and losing bid bar (red) — both sized relative
-  // to the player's own budget at the start of this turn, so the player
-  // sees at a glance how big each commitment was.
+  const maxBudget = Math.max(budgetsBefore[0], budgetsBefore[1], 1);
   const xWon = result.winner === 1 /* Mark.X */;
-  card.append(bidBar("X", xMove.bid, budgetsBefore, 0, xWon));
-  card.append(bidBar("O", oMove.bid, budgetsBefore, 1, !xWon));
+  card.append(bidBar("X", xMove.bid, maxBudget, xWon));
+  card.append(bidBar("O", oMove.bid, maxBudget, !xWon));
   return card;
 }
 
-/** A single bid bar. `won` controls the colour (green win / red loss). */
 function bidBar(
   player: string,
   bid: number,
-  budgetsBefore: [number, number],
-  idx: 0 | 1,
+  maxBudget: number,
   won: boolean,
 ): HTMLElement {
   const row = document.createElement("div");
   row.className = `game-log__bid game-log__bid--${won ? "win" : "loss"}`;
   const lbl = document.createElement("span");
   lbl.className = "game-log__bid-label";
-  const maxBudget = budgetsBefore[idx];
   const pctOfBudget = maxBudget > 0 ? Math.max(0, Math.min(1, bid / maxBudget)) : 0;
-  lbl.textContent = `${player} bid ${bid}`;
+  lbl.innerHTML = `<span class="game-log__mark game-log__mark--${player.toLowerCase()}">${player}</span> bid <code>${bid}</code>`;
   const track = document.createElement("div");
   track.className = "game-log__bar-track";
   const fill = document.createElement("div");

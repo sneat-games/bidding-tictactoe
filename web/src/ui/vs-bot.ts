@@ -6,14 +6,37 @@ import { Mark, Outcome, boardOutcome, newGame, resolveTurn, markString, outcomeS
 import { botMove } from "../bot/bot";
 import { createBidInput } from "./bid-input";
 import { createGameLog } from "./game-log";
+import { createBudgetDisplay } from "./budget-display";
+import { loadState, restoreGame, saveState, clearAll, charToMark, stateFromGame } from "../pvp/game-store";
 
 const BUDGET = 100;
 
 export async function runVsBot(root: HTMLElement): Promise<void> {
-  let game = newGame(BUDGET);
-  let human: Mark = Mark.X;
-  let botMark: Mark = Mark.O;
-  let turn = 0;
+  // Try restoring a saved vs-bot game so a page reload doesn't lose the board.
+  const saved = await loadState();
+  let game: ReturnType<typeof newGame>;
+  let human: Mark;
+  let botMark: Mark;
+  let turn: number;
+  if (saved && saved.mode === "vs-bot") {
+    const restored = await restoreGame(saved);
+    if (restored) {
+      game = restored;
+      human = charToMark(saved.human);
+      botMark = human === Mark.X ? Mark.O : Mark.X;
+      turn = saved.turn;
+    } else {
+      game = newGame(BUDGET);
+      human = Mark.X;
+      botMark = Mark.O;
+      turn = 0;
+    }
+  } else {
+    game = newGame(BUDGET);
+    human = Mark.X;
+    botMark = Mark.O;
+    turn = 0;
+  }
 
   // Two-column layout: board area (left) + game log (right).
   root.innerHTML = "";
@@ -28,13 +51,20 @@ export async function runVsBot(root: HTMLElement): Promise<void> {
     xLabel: "You",
     oLabel: "Bot",
   });
+  const budgetDisplay = createBudgetDisplay({
+    xLabel: "You",
+    oLabel: "Bot",
+    initialBudget: BUDGET,
+  });
   logArea.append(log.el);
   screen.append(boardArea, logArea);
   root.append(screen);
 
   while (true) {
-    const outcome = await playOneTurn(boardArea, game, human, botMark, log, turn);
+    const outcome = await playOneTurn(boardArea, game, human, botMark, log, budgetDisplay, turn);
     if (outcome !== Outcome.Ongoing) {
+      clearAll();
+      budgetDisplay.update(game.budget);
       const again = await renderResult(boardArea, outcome, game);
       if (!again) return;
       game = newGame(BUDGET);
@@ -42,8 +72,10 @@ export async function runVsBot(root: HTMLElement): Promise<void> {
       botMark = Mark.O;
       turn = 0;
       log.clear();
+      budgetDisplay.update(game.budget);
     } else {
       turn++;
+      saveState(stateFromGame("vs-bot", game, turn, human));
     }
   }
 }
@@ -54,9 +86,12 @@ async function playOneTurn(
   human: Mark,
   botMark: Mark,
   log: ReturnType<typeof createGameLog>,
+  budgetDisplay: ReturnType<typeof createBudgetDisplay>,
   turn: number,
 ): Promise<Outcome> {
   renderBoard(root, game, human, botMark);
+  root.prepend(budgetDisplay.el);
+  budgetDisplay.update(game.budget);
   // Wait for human's move.
   const humanMove = await askHuman(root, game, human);
   // Bot picks its move.
@@ -71,9 +106,9 @@ async function playOneTurn(
   try {
     const { game: next, result } = resolveTurn(game, xMove, oMove);
     Object.assign(game, next);
-    // Re-render the board with the post-move state so the winning mark
-    // is visible (and the prompt/submit UI is cleared).
     renderBoard(root, game, human, botMark);
+    root.prepend(budgetDisplay.el);
+    budgetDisplay.update(game.budget);
     renderTurnResult(root, result, game, human);
     log.append({
       turn,
@@ -90,7 +125,7 @@ async function playOneTurn(
   }
 }
 
-function renderBoard(root: HTMLElement, game: ReturnType<typeof newGame>, human: Mark, botMark: Mark) {
+function renderBoard(root: HTMLElement, game: ReturnType<typeof newGame>, human: Mark, _botMark: Mark) {
   root.innerHTML = "";
   const board = document.createElement("div");
   board.className = "board";
@@ -101,12 +136,14 @@ function renderBoard(root: HTMLElement, game: ReturnType<typeof newGame>, human:
     cell.className = "board__cell";
     cell.setAttribute("data-cell", String(i));
     cell.textContent = markString(game.board[i]);
+    if (game.board[i] === Mark.X) cell.classList.add("board__cell--x");
+    else if (game.board[i] === Mark.O) cell.classList.add("board__cell--o");
     if (game.board[i] !== 0 /* Empty */) cell.disabled = true;
     board.appendChild(cell);
   }
   const status = document.createElement("p");
   status.className = "status";
-  status.textContent = `You are ${markString(human)}. Budgets — You: ${game.budget[human === Mark.X ? 0 : 1]}, Bot: ${game.budget[botMark === Mark.X ? 0 : 1]}.`;
+  status.textContent = `You are ${markString(human)}.`;
   root.append(board, status);
 }
 
@@ -115,24 +152,32 @@ async function askHuman(
   game: ReturnType<typeof newGame>,
   human: Mark,
 ): Promise<{ bid: number; cell: number }> {
+  const botMark: Mark = human === Mark.X ? Mark.O : Mark.X;
   const remaining = game.budget[human === Mark.X ? 0 : 1];
-  const bid = createBidInput({ max: remaining, initial: Math.floor(remaining / 2) });
+  const botRemaining = game.budget[botMark === Mark.X ? 0 : 1];
+  // Strategic auto-default: if the bot can't afford more than half our
+  // budget, bid just above what the bot could possibly match to guarantee
+  // winning the turn. Falls back to half-remaining otherwise.
+  let initial = Math.floor(remaining / 2);
+  if (botRemaining < Math.floor(remaining / 2) && botRemaining + 1 <= remaining) {
+    initial = botRemaining + 1;
+  }
+  const bid = createBidInput({ max: remaining, initial });
 
   const prompt = document.createElement("div");
   prompt.className = "prompt";
   prompt.append("Pick your bid, then click a cell to commit:", bid.el);
   root.append(prompt);
 
-  let chosenCell: number | null = null;
   const cells = root.querySelectorAll<HTMLButtonElement>(".board__cell");
   return new Promise((resolve) => {
     cells.forEach((c) => {
       if (c.disabled) return;
       c.addEventListener("click", () => {
-        chosenCell = parseInt(c.dataset.cell ?? "", 10);
-        if (chosenCell !== null) {
-          resolve({ bid: bid.value(), cell: chosenCell });
-        }
+        cells.forEach((x) => x.classList.remove("selected", "pending"));
+        c.classList.add("selected", "pending");
+        c.textContent = markString(human);
+        resolve({ bid: bid.value(), cell: parseInt(c.dataset.cell ?? "", 10) });
       });
     });
   });

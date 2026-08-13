@@ -6,12 +6,17 @@
 //     vs-friend mode as the HOST immediately.
 //   - Else show the mode-select menu (vs-bot / vs-friend).
 //
+// After a vs-bot or vs-friend session ends (user clicks "Back to menu"),
+// the menu re-renders so the player can pick another mode without a page
+// reload.
+//
 // All screens are vanilla TS DOM; the CrazyGames SDK wrapper gates every
 // SDK call so the same bundle runs on sneat.games (no SDK) and on CrazyGames
 // (full SDK).
 
-import { initSdk, isSdkAvailable, isInstantMultiplayer, inviteParams, addSettingsChangeListener, getSettings, gameplayStart, gameplayStop, loadingStart, loadingStop, leftRoom } from "./crazygames/sdk";
+import { initSdk, isSdkAvailable, isInstantMultiplayer, inviteParams, addSettingsChangeListener, getSettings, gameplayStart, gameplayStop, loadingStart, loadingStop } from "./crazygames/sdk";
 import { roomIdFromLocation } from "./pvp/room";
+import { loadState, clearAll } from "./pvp/game-store";
 import { renderMenu } from "./ui/menu";
 import { runVsBot } from "./ui/vs-bot";
 import { runVsFriend } from "./ui/vs-friend";
@@ -20,8 +25,6 @@ export async function bootstrap() {
   loadingStart();
   try {
     await initSdk();
-    // Apply audio-mute + chat-disable settings up front, and listen for
-    // changes (CrazyGames can toggle them while the game is running).
     const s = getSettings();
     if (s) applySettings(s);
     addSettingsChangeListener(applySettings);
@@ -32,7 +35,6 @@ export async function bootstrap() {
   }
 
   const root = document.getElementById("game")!;
-  root.innerHTML = "";
 
   // 1. Invite-link join (sneat.games share-link OR CrazyGames invite link).
   const fromLink = roomIdFromLocation();
@@ -56,19 +58,52 @@ export async function bootstrap() {
     return;
   }
 
-  // 3. Mode-select menu.
-  const choice = await renderMenu(root);
-  if (choice === "vs-bot") {
+  // 3. Resume a saved game if one exists (page reload mid-match).
+  const saved = await loadState();
+  if (saved && saved.mode === "vs-bot") {
     gameplayStart();
     await runVsBot(root);
     gameplayStop();
-  } else if (choice === "vs-friend") {
-    gameplayStart();
-    await runVsFriend(root, { as: "host" });
-    gameplayStop();
-  } else if (choice === "leave") {
-    leftRoom();
+  } else if (saved && saved.mode === "vs-friend" && saved.roomId && saved.as) {
+    if (!fromLink) {
+      renderReconnectingStatus(root);
+      gameplayStart();
+      await runVsFriend(root, { as: saved.as, roomId: saved.roomId });
+      gameplayStop();
+    }
   }
+
+  // 4. Mode-select menu, loops back whenever a session ends.
+  while (true) {
+    root.innerHTML = "";
+    clearAll(); // wipe game state + log entries before fresh menu
+    const choice = await renderMenu(root);
+    if (choice === "vs-bot") {
+      gameplayStart();
+      await runVsBot(root);
+      gameplayStop();
+    } else if (choice === "vs-friend") {
+      gameplayStart();
+      await runVsFriend(root, { as: "host" });
+      gameplayStop();
+    }
+  }
+}
+
+function renderReconnectingStatus(root: HTMLElement) {
+  root.innerHTML = "";
+  const overlay = document.createElement("div");
+  overlay.className = "reconnecting";
+  const spinner = document.createElement("div");
+  spinner.className = "reconnecting__spinner";
+  const text = document.createElement("p");
+  text.className = "reconnecting__text";
+  text.textContent = "Reconnecting…";
+  const sub = document.createElement("p");
+  sub.className = "reconnecting__sub";
+  sub.textContent = "Re-establishing WebRTC channel";
+  overlay.append(spinner, text, sub);
+  root.append(overlay);
 }
 
 function applySettings(s: { disableChat?: boolean; muteAudio?: boolean }) {

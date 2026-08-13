@@ -4,7 +4,12 @@ import Layout from "../layouts/Layout.astro";
 <Layout title="Bidding Tic-Tac-Toe">
   <main id="app">
     <h1>Bidding Tic-Tac-Toe</h1>
-    <p id="status">Loading…</p>
+    <p id="rules" class="rules">
+      Each turn both players secretly bid from their budget for the right to
+      place a mark. The higher bidder wins the turn, places their mark, and
+      <strong>transfers their bid to the lower bidder</strong>. Equal bids
+      are decided by an alternating tie-break. Three in a row wins.
+    </p>
     <div id="game" aria-live="polite"></div>
   </main>
   <script>
