@@ -1,6 +1,6 @@
 module github.com/sneat-games/bidding-tictactoe
 
-go 1.25
+go 1.27.0
 
 require (
 	github.com/dal-go/dalgo v0.64.4
