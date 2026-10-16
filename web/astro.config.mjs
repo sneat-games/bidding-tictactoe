@@ -3,10 +3,10 @@ import AstroPWA from "@vite-pwa/astro";
 
 export default defineConfig({
   // CrazyGames/itch.io accept a static HTML5 bundle; Static is the default
-  // output, and every asset path stays relative (scripts/relativize-dist.mjs,
+  // output, and every asset path stays relative (game-kit's `sneat-relativize-dist`,
   // run as part of `npm run build` — see that script's own doc comment and
   // docs/DESIGN.md "Distribution: CrazyGames + itch.io") so the same dist/
-  // zips for either portal or deploys to bidding-tictactoe.sneat.games
+  // zips for either portal or is served from https://sneat.games/bidding-tictactoe/
   // unchanged.
   output: "static",
   // WebRTC + SDK will run client-side; Astro's client:only pattern keeps the
@@ -17,7 +17,7 @@ export default defineConfig({
       registerType: "autoUpdate",
       // Auto-injection is OFF: main.ts registers the built service worker
       // itself via @sneat/game-kit's registerServiceWorker(), gated to
-      // *.sneat.games only — never in `astro dev`, and never inside a
+      // sneat.games only (apex or *.sneat.games) — never in `astro dev`, and never inside a
       // CrazyGames/itch.io iframe (see docs/DESIGN.md "Offline" and
       // APP-PLAYBOOK gotchas 2 and 9: a bare
       // `navigator.serviceWorker.register()` leaves `registerType:
@@ -32,7 +32,7 @@ export default defineConfig({
         theme_color: "#4f46e5",
         background_color: "#0f172a",
         display: "standalone",
-        // Relative, not root-absolute: relativize-dist.mjs would otherwise
+        // Relative, not root-absolute: sneat-relativize-dist would otherwise
         // have to rewrite these too, and a relative start_url/scope also
         // resolves correctly from a nested CrazyGames/itch.io mount path,
         // not just from the sneat.games root (dots-and-boxes/web's kit

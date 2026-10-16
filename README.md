@@ -20,7 +20,7 @@ specscore spec lint                 # enforce lint
 
 The active Feature is [`web-app`](spec/features/web-app/README.md) — the
 client-only Astro + TypeScript web build for CrazyGames and
-`bidding-tictactoe.sneat.games`. Its acceptance criteria are normative; the
+[sneat.games/bidding-tictactoe](https://sneat.games/bidding-tictactoe/). Its acceptance criteria are normative; the
 Go `server-go/btttplay` package is the rule-of-record and the TS port in
 `web/src/engine` mirrors it fixture-for-fixture.
 

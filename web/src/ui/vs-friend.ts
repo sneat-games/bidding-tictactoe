@@ -37,6 +37,7 @@ import { Mark, Outcome, newGame, resolveTurn, boardOutcome, Game, Move } from ".
 import {
   reserveRoomId,
   shareLinkFor,
+  inviteBaseUrl,
   hostPeer,
   guestPeer,
   openTurnInbox,
@@ -115,7 +116,7 @@ export async function runVsFriend(
       // who can never connect (see game-kit/docs/APP-PLAYBOOK.md gotcha 5).
       // shareLinkFor builds the same link from roomId (already known here),
       // so nothing here waits on the peer.
-      const base = typeof window !== "undefined" ? `${window.location.origin}${window.location.pathname}` : "";
+      const base = typeof window !== "undefined" ? inviteBaseUrl(GAME_ID) : "";
       renderInvite(root, {
         roomId,
         shareLink: shareLinkFor(base, roomId),

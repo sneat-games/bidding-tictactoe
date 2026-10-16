@@ -1,7 +1,7 @@
 # Bidding Tic-Tac-Toe — Web
 
 Client-only Astro + TypeScript web build of Bidding Tic-Tac-Toe, packaged
-for both CrazyGames and `bidding-tictactoe.sneat.games`. No server-side
+for both CrazyGames and `https://sneat.games/bidding-tictactoe/`. No server-side
 game state: vs-bot plays locally, vs-friend uses `@sneat/game-kit`'s shared
 `pvp` module against the shared `sneat-games/webrtc-relay` deployment
 (`webrtc.sneat.games`, no DB, no auth, no game state — gameId-namespaced so
@@ -42,15 +42,18 @@ the full reasoning.
 
 | Surface                | Worker                                          | Domain                                   |
 |------------------------|-------------------------------------------------|------------------------------------------|
-| Static game            | `web/host-worker/`                              | `bidding-tictactoe.sneat.games`          |
+| Static game            | release asset served by `sneat-games/sneat.games` (assets-only Worker `sneat-games`) | `sneat.games/bidding-tictactoe/` |
 | WebRTC signaling relay | `sneat-games/webrtc-relay` (shared, external)   | `webrtc.sneat.games`                     |
 | CrazyGames build       | `web/dist/` zip uploaded via Developer Portal   | `crazygames.com/game/bidding-tic-tac-toe`|
 
-Deploy this repo's own worker:
-
-```sh
-npm run host:deploy     # bidding-tictactoe.sneat.games
-```
+This repo deploys nothing itself: the game is served from
+https://sneat.games/bidding-tictactoe/ by sneat-games/sneat.games from a
+pinned `web-<sha>` release. `.github/workflows/web-ci.yml`'s `release` job
+publishes the tested `dist/` on every push to `main` that touches `web/`;
+bump the pin with `node scripts/games-lock.mjs bump bidding-tictactoe
+web-<sha>` in that repo. The retired `bidding-tictactoe.sneat.games`
+subdomain hands saves over via `#migrate=` (`consumeMigratedStorage()` in
+`src/main.ts`).
 
 The WebRTC signaling relay is deployed and owned by the `sneat-games/
 webrtc-relay` repo, not this one — see that repo for its own deploy
@@ -72,7 +75,7 @@ migration.)
 - **vs Friend** — inviter reserves a 6-char room code on the shared relay
   (`@sneat/game-kit`'s `reserveRoomId`, namespaced `gameId:
   "bidding-tictactoe"`) and shares
-  `https://bidding-tictactoe.sneat.games/#room=<code>`. The invitee opens
+  `https://sneat.games/bidding-tictactoe/#room=<code>`. The invitee opens
   the link: the bootstrap in `src/main.ts` detects `#room=`, becomes the
   guest, and establishes a WebRTC DataChannel through the shared relay
   (`@sneat/game-kit`'s `hostPeer`/`guestPeer`, see `src/ui/vs-friend.ts`).
@@ -165,7 +168,7 @@ forced with `?cgsdk=1`), then awaits `init()` before any other SDK call per
 the v3 docs. Off CrazyGames the SDK only ever reports
 `environment: "disabled"`, so loading it is pure cost — a static tag in the
 head is render-blocking and delayed the menu on
-`bidding-tictactoe.sneat.games` by 7-10s. Astro's static output is still the
+`sneat.games/bidding-tictactoe/` by 7-10s. Astro's static output is still the
 HTML5 build CrazyGames accepts.
 
 To exercise the SDK path locally, open `http://localhost:4321/?cgsdk=1`.
@@ -198,7 +201,6 @@ web/
 │   ├── layouts/
 │   │   └── Layout.astro
 │   └── main.ts        bootstrap: invite-link / instant-multiplayer / menu
-├── host-worker/       CF Worker serving dist/ at bidding-tictactoe.sneat.games
 ├── astro.config.mjs
 ├── tsconfig.json      web tsconfig
 ├── vitest.config.ts
@@ -234,5 +236,5 @@ so any rule change in Go trips a corresponding test failure on the TS side.
   potential competitive modes later, or is randomness fine for the web app?
 - Does the CrazyGames SDK v3 HTML5 script tag conflict with any sitelock
   requirement when the same `dist/` is hosted at
-  `bidding-tictactoe.sneat.games`? (Expected: no — the SDK disables
+  `sneat.games/bidding-tictactoe/`? (Expected: no — the SDK disables
   itself on non-CrazyGames domains via `environment: "disabled"`.)

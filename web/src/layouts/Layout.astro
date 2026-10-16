@@ -4,7 +4,7 @@ import "../styles/global.css";
 // third-party tag there is render-blocking, and off CrazyGames it buys
 // nothing: the SDK initialises to `environment: "disabled"` and does no work,
 // while costing 7-10s before the menu appears on
-// bidding-tictactoe.sneat.games.
+// sneat.games/bidding-tictactoe/.
 //
 // `src/crazygames/sdk.ts` injects the script on demand instead, and only on a
 // CrazyGames surface — still awaiting `init()` before any other SDK call, as
@@ -35,7 +35,7 @@ const favicon =
     <meta property="og:site_name" content="Sneat Games" />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
-    <meta property="og:url" content="https://bidding-tictactoe.sneat.games/" />
+    <meta property="og:url" content="https://sneat.games/bidding-tictactoe/" />
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f8fafc" />
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f172a" />
     <link rel="icon" href={favicon} />

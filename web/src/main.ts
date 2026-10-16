@@ -11,12 +11,17 @@
 // (full SDK).
 
 import { initSdk, isSdkAvailable, isInstantMultiplayer, inviteParams, addSettingsChangeListener, getSettings, gameplayStart, gameplayStop, loadingStart, loadingStop, leftRoom } from "./crazygames/sdk";
-import { createThemeToggle, createGamesFooter, registerServiceWorker, roomIdFromLocation } from "@sneat/game-kit";
+import { createThemeToggle, createGamesFooter, registerServiceWorker, roomIdFromLocation, consumeMigratedStorage } from "@sneat/game-kit";
 import { renderMenu } from "./ui/menu";
 import { runVsBot } from "./ui/vs-bot";
 import { runVsFriend } from "./ui/vs-friend";
 
 export async function bootstrap() {
+  // First, before anything reads localStorage: saves handed over from the
+  // retired bidding-tictactoe.sneat.games subdomain (`#migrate=`, written by
+  // sneat.games' /__migrate.html). A no-op on every other load; it strips
+  // only its own fragment parameter, so a `#room=` invite still works below.
+  consumeMigratedStorage();
   // Mounted synchronously, first — no network, no SDK, so neither ever
   // delays (or is delayed by) the instant-menu path below.
   mountThemeToggle();
@@ -25,8 +30,10 @@ export async function bootstrap() {
   // false`) registers only on this game's real deploy surface — never in
   // `astro dev` (which has no /sw.js to register in the first place), and
   // never inside a CrazyGames/itch.io iframe (docs/DESIGN.md "Offline").
-  // The kit's default gate (hostname.endsWith(".sneat.games")) implements
-  // exactly that. Using @sneat/game-kit's registerServiceWorker() here —
+  // The kit's default gate (`isSneatGamesHost()`: the apex or
+  // *.sneat.games) implements exactly that, and it registers `sw.js`
+  // relative to the page with scope `./` (`/bidding-tictactoe/` on
+  // sneat.games, never the site root). Using @sneat/game-kit's registerServiceWorker() here —
   // never a bare `navigator.serviceWorker.register()` — matters: with
   // `injectRegister: false`, `registerType: "autoUpdate"` is INERT, so a
   // bare register() leaves every returning player frozen on the build they
