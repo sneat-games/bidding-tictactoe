@@ -11,13 +11,6 @@ export default [
       "dist",
       "node_modules",
       ".astro",
-      // Unanchored, matching .gitignore's reasoning: host-worker/ and any
-      // future worker each get their OWN local wrangler state dir, so a
-      // root-anchored ".wrangler" misses them. Deleting signaling-worker/
-      // exposed this — its state dir had only been ignored incidentally, by
-      // the "signaling-worker" entry that went with it.
-      "**/.wrangler",
-      "host-worker",
       "test-results",
       "playwright-report",
     ],

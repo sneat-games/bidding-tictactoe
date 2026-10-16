@@ -29,6 +29,8 @@ on:
     paths:
       - 'web/**'
       - '.github/workflows/web-ci.yml'
+  # Manual re-release of main (e.g. after a failed release job).
+  workflow_dispatch:
 
 defaults:
   run:
@@ -62,6 +64,13 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Upload build output
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+          retention-days: 1
+
   e2e:
     name: e2e (Playwright)
     runs-on: ubuntu-latest
@@ -91,3 +100,66 @@ jobs:
           name: playwright-report
           path: web/playwright-report
           retention-days: 5
+
+  # Publishes the exact dist/ the `web` job built (and `e2e` exercised) as a
+  # GitHub release asset. This repo deploys nothing itself: the game is
+  # served from https://sneat.games/bidding-tictactoe/ by the assets-only
+  # sneat-games Worker, which pins a release in sneat-games/sneat.games'
+  # games.lock.json (version + URL + sha256, verified at build). Bump it there
+  # with `node scripts/games-lock.mjs bump bidding-tictactoe <tag>` and open a PR.
+  #
+  # Tag: web-<12-char sha>. Never a plain vX.Y.Z — those belong to the Go
+  # bot's strongo/cicd auto-tagging in ci.yml. Not marked "latest", so the
+  # Go releases keep that slot.
+  release:
+    name: release web bundle
+    runs-on: ubuntu-latest
+    needs: [web, e2e]
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    permissions:
+      contents: write
+    concurrency:
+      group: web-release-${{ github.sha }}
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - name: Download the tested build
+        uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: dist
+
+      - name: Pack a deterministic tarball + sha256
+        id: pack
+        run: |
+          set -euo pipefail
+          short="${GITHUB_SHA::12}"
+          tag="web-${short}"
+          asset="bidding-tictactoe-web-${short}.tar.gz"
+          printf '{"repo":"%s","sha":"%s","tag":"%s"}\n' "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$tag" > dist/build-info.json
+          test -f dist/index.html && test -f dist/sw.js
+          tar --sort=name --mtime='UTC 2000-01-01' --owner=0 --group=0 --numeric-owner \
+            -C dist -cf - . | gzip -n > "$asset"
+          sha256sum "$asset" > "$asset.sha256"
+          cat "$asset.sha256"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "asset=$asset" >> "$GITHUB_OUTPUT"
+
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.pack.outputs.tag }}
+          ASSET: ${{ steps.pack.outputs.asset }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ASSET" "$ASSET.sha256" --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" "$ASSET" "$ASSET.sha256" \
+              --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest=false \
+              --title "Web bundle $TAG" \
+              --notes "Static web build of ${GITHUB_SHA} for https://sneat.games/bidding-tictactoe/. sha256: $(cut -d' ' -f1 "$ASSET.sha256")"
+          fi
+          echo "::notice title=Web release::$TAG — bump sneat-games/sneat.games: node scripts/games-lock.mjs bump bidding-tictactoe $TAG"
