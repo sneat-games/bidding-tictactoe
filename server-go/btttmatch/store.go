@@ -8,11 +8,11 @@ import (
 )
 
 // CollectionMatches is the dalgo collection name matches are stored under.
-const CollectionMatches = "bttt-matches"
+const CollectionMatches = "matches"
 
-// NewMatchKey builds the dalgo key identifying matchID's Match record.
+// NewMatchKey identifies a match under its dedicated game extension.
 func NewMatchKey(matchID string) *record.Key {
-	return record.NewKeyWithID(CollectionMatches, matchID)
+	return record.NewKeyWithParentAndID(record.NewKeyWithID("ext", "bidding-tictactoe"), CollectionMatches, matchID)
 }
 
 // GetMatch loads matchID's Match. It returns an error satisfying
